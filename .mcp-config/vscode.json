@@ -1,0 +1,10 @@
+{
+  "$schema": "https://github.com/microsoft/vscode-mcp/blob/main/schema.json",
+  "servers": {
+    "agenthub": {
+      "type": "http",
+      "url": "http://localhost:3333/mcp",
+      "description": "AgentHub multi-agent orchestrator"
+    }
+  }
+}
