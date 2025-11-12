@@ -352,13 +352,27 @@ export class Coordinator {
     const base2 = this.normalizePathForComparison(scan2.base);
 
     // Check if one base is a directory prefix of the other (with proper boundary checking)
-    if (this.isDirectoryPrefix(base1, base2) || this.isDirectoryPrefix(base2, base1)) {
-      return true;
+    // Only treat as definite overlap if both bases are non-empty and one strictly contains the other
+    // (e.g., "src/foo" vs "src/foo/bar" definitely overlap)
+    if (base1.length > 0 && base2.length > 0) {
+      if (
+        base1 !== base2 &&
+        (this.isDirectoryPrefix(base1, base2) || this.isDirectoryPrefix(base2, base1))
+      ) {
+        // One path is strictly within the other - definite overlap
+        return true;
+      }
     }
 
+    // For equal bases, empty bases, or root-level patterns, we must test actual pattern matching
+    // because they might target different files despite sharing a base directory
+    // Examples: *.ts vs src/**, or src/**/foo.ts vs src/**/bar.ts
+
     // If they share no common directory, they definitely don't overlap
+    // UNLESS one or both have empty base (root level), in which case we need to test patterns
     const commonPrefix = this.getCommonDirectoryPrefix(base1, base2);
-    if (commonPrefix.length === 0) {
+    if (commonPrefix.length === 0 && base1.length > 0 && base2.length > 0) {
+      // Both have specific bases that don't overlap (e.g., "src" vs "dist")
       return false;
     }
 
@@ -433,6 +447,7 @@ export class Coordinator {
 
   /**
    * Generate test paths to check for pattern overlap
+   * Only generates paths that could realistically match BOTH patterns
    */
   private generateTestPaths(base1: string, base2: string, commonPrefix: string[]): string[] {
     const paths: string[] = [];
@@ -442,11 +457,11 @@ export class Coordinator {
     if (base1.length > 0) {
       paths.push(`${base1}/file.ts`, `${base1}/index.ts`, `${base1}/test.js`);
     }
-    if (base2.length > 0) {
+    if (base2.length > 0 && base2 !== base1) {
       paths.push(`${base2}/file.ts`, `${base2}/index.ts`, `${base2}/test.js`);
     }
 
-    // Test paths at common prefix
+    // Test paths at common prefix (only if there IS a common prefix)
     if (commonPath.length > 0) {
       paths.push(
         `${commonPath}/file.ts`,
@@ -455,8 +470,22 @@ export class Coordinator {
       );
     }
 
-    // Test paths from root
-    paths.push('file.ts', 'index.ts', 'src/index.ts', 'src/server/index.ts');
+    // Only add root-level paths if BOTH patterns could match root files
+    // (i.e., both have empty base or start with * or **)
+    const base1IsRoot = base1.length === 0;
+    const base2IsRoot = base2.length === 0;
+
+    if (base1IsRoot && base2IsRoot) {
+      // Both patterns can match root files
+      paths.push('file.ts', 'index.ts', 'test.js');
+    }
+
+    // If patterns have different bases and no common prefix, they likely don't overlap
+    // Don't generate irrelevant test paths
+    if (commonPath.length === 0 && base1.length > 0 && base2.length > 0 && base1 !== base2) {
+      // No common ground - paths will be empty or minimal
+      return paths;
+    }
 
     return paths;
   }
@@ -540,8 +569,18 @@ export class Coordinator {
   }
 
   // =========================================================================
-  // Utilities
+  // Utilities & Cleanup
   // =========================================================================
+
+  /**
+   * Clear all vote timers (for graceful shutdown)
+   */
+  clearVoteTimers(): void {
+    for (const timer of this.voteTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.voteTimers.clear();
+  }
 
   /**
    * Check if intent should be allowed based on priority and conflicts

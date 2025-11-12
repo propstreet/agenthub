@@ -22,6 +22,7 @@ import { handleMessageSend, handleMessagePull } from './tools/messages.js';
 import { handleReviewRequest } from './tools/review.js';
 import { handleExpertAsk } from './tools/expert.js';
 import { handleStateGet } from './tools/state.js';
+import { handleAgentRegister } from './tools/agents.js';
 
 // Resource handlers
 import { handleInboxResource } from './resources/inbox.js';
@@ -39,20 +40,21 @@ export function createMCPServer(
   });
 
   // =========================================================================
-  // Register hub.op Tool (Multi-Operation)
+  // Register hub_op Tool (Multi-Operation)
   // =========================================================================
 
   server.registerTool(
-    'hub.op',
+    'hub_op',
     {
       title: 'Hub Operation',
       description:
-        'Multi-agent coordination. Ops: i.open|i.vote|i.renew|i.close (intents), ' +
+        'Multi-agent coordination. Ops: a.register (agent), i.open|i.vote|i.renew|i.close (intents), ' +
         'l.announce (lease), m.send|m.pull (messages), review.request (code review), ' +
         'expert.ask (escalation), s.get (state). ' +
         'Fields: agent, paths[], mode(R|W|B|T), priority(l|n|h|r), ttlMs',
       inputSchema: {
         op: z.enum([
+          'a.register',
           'i.open',
           'i.vote',
           'i.renew',
@@ -74,31 +76,36 @@ export function createMCPServer(
         let result;
 
         switch (op) {
+          // Agent operations
+          case 'a.register':
+            result = await handleAgentRegister(state, d);
+            break;
+
           // Intent operations
           case 'i.open':
-            result = await handleIntentOpen(coordinator, d);
+            result = await handleIntentOpen(state, coordinator, d);
             break;
           case 'i.vote':
-            result = await handleIntentVote(coordinator, d);
+            result = await handleIntentVote(state, coordinator, d);
             break;
           case 'i.renew':
-            result = await handleIntentRenew(coordinator, d);
+            result = await handleIntentRenew(state, coordinator, d);
             break;
           case 'i.close':
-            result = await handleIntentClose(coordinator, d);
+            result = await handleIntentClose(state, coordinator, d);
             break;
 
           // Lease operations
           case 'l.announce':
-            result = await handleLeaseAnnounce(coordinator, d);
+            result = await handleLeaseAnnounce(state, coordinator, d);
             break;
 
           // Message operations
           case 'm.send':
-            result = await handleMessageSend(bus, d);
+            result = await handleMessageSend(state, bus, d);
             break;
           case 'm.pull':
-            result = await handleMessagePull(bus, d);
+            result = await handleMessagePull(state, bus, d);
             break;
 
           // Review operations
@@ -108,7 +115,7 @@ export function createMCPServer(
 
           // Expert escalation
           case 'expert.ask':
-            result = await handleExpertAsk(expert, bus, d);
+            result = await handleExpertAsk(expert, state, bus, d);
             break;
 
           // State query
@@ -203,7 +210,7 @@ export function createMCPServer(
     console.error('[MCP] Protocol error:', error);
   };
 
-  console.log('[MCP] Server initialized with hub.op tool and resources');
+  console.log('[MCP] Server initialized with hub_op tool and resources');
 
   return server;
 }

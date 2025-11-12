@@ -90,27 +90,96 @@ async function main(): Promise<void> {
   // Create and start MCP server
   console.log('\nStarting MCP server...');
   const mcpServer = createMCPServer(bus, state, coordinator, expert);
-  createHttpTransport(mcpServer, config.port, config.host);
+  const httpApp = createHttpTransport(mcpServer, state, config.port, config.host);
 
   console.log(`\n${'='.repeat(60)}`);
   console.log('AgentHub is ready!');
   console.log('='.repeat(60));
   console.log(`\nMCP endpoint: http://${config.host}:${config.port}/mcp`);
   console.log(`Health check: http://${config.host}:${config.port}/health`);
+  console.log(`Dashboard state: http://${config.host}:${config.port}/state/live`);
   console.log('\nPress Ctrl+C to stop\n');
 
   // Graceful shutdown
-  process.on('SIGINT', async () => {
-    console.log('\n\nShutting down gracefully...');
+  let shutdownInProgress = false;
+  process.on('SIGINT', () => {
+    if (shutdownInProgress) {
+      console.log('[SIGINT] Already shutting down, ignoring duplicate signal');
+      return;
+    }
+    shutdownInProgress = true;
 
-    if (watcher !== null) {
-      await watcher.stop();
+    console.log('\n\n[SIGINT] Signal received, starting shutdown...');
+    console.log(`[SIGINT] Process PID: ${process.pid}`);
+    console.log(`[SIGINT] Node version: ${process.version}`);
+
+    // Check active handles before cleanup (Node internal debugging)
+    const processWithHandles = process as typeof process & {
+      _getActiveHandles?: () => any[];
+    };
+    if (processWithHandles._getActiveHandles !== undefined) {
+      const handlesBefore = processWithHandles._getActiveHandles();
+      console.log(`[SIGINT] Active handles before cleanup: ${handlesBefore.length}`);
+      console.log(
+        '[SIGINT] Handle types:',
+        handlesBefore.map((h: any) => h.constructor.name).join(', '),
+      );
     }
 
-    bus.clear();
-    state.clear();
+    // Close HTTP server synchronously (get the server instance)
+    const appWithServer = httpApp as typeof httpApp & {
+      httpServer?: ReturnType<typeof httpApp.listen>;
+    };
+    if (appWithServer.httpServer !== undefined) {
+      console.log('[SIGINT] Closing HTTP server...');
+      // Force close all connections and server without waiting
+      try {
+        const server = appWithServer.httpServer;
 
-    console.log('Goodbye!');
+        // Get active connections and destroy them
+        server.getConnections((_err, count) => {
+          console.log(`[SIGINT] Destroying ${count} active HTTP connections`);
+        });
+
+        // Force close without callback
+        server.closeAllConnections?.(); // Node 18.2+ method
+        server.close();
+        console.log('[SIGINT] ✓ HTTP server closed');
+      } catch (error) {
+        console.log(`[SIGINT] HTTP server close error (ignoring): ${error}`);
+      }
+    }
+
+    console.log('[SIGINT] Stopping cleanup timers...');
+    state.stopCleanupTimers();
+    console.log('[SIGINT] ✓ Cleanup timers stopped');
+
+    console.log('[SIGINT] Clearing vote timers...');
+    coordinator.clearVoteTimers();
+    console.log('[SIGINT] ✓ Vote timers cleared');
+
+    console.log('[SIGINT] Clearing message bus...');
+    bus.clear();
+    console.log('[SIGINT] ✓ Message bus cleared');
+
+    console.log('[SIGINT] Clearing state cache...');
+    state.clear();
+    console.log('[SIGINT] ✓ State cache cleared');
+
+    // Check active handles after cleanup (Node internal debugging)
+    if (processWithHandles._getActiveHandles !== undefined) {
+      const handlesAfter = processWithHandles._getActiveHandles();
+      console.log(`[SIGINT] Active handles after cleanup: ${handlesAfter.length}`);
+      console.log(
+        '[SIGINT] Handle types:',
+        handlesAfter.map((h: any) => h.constructor.name).join(', '),
+      );
+    }
+
+    console.log('[SIGINT] Goodbye!');
+    console.log('[SIGINT] Calling process.exit(0)...');
+
+    // Exit immediately
     process.exit(0);
   });
 }

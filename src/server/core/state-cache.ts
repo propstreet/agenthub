@@ -22,6 +22,15 @@ export class StateCache {
   private bus: MessageBus;
   private config: ServerConfig;
 
+  // Session tracking: sessionId → agentName
+  // Ensures one agent identity per MCP session
+  private sessionToAgent = new Map<string, string>();
+  // Reverse lookup: agentName → sessionId
+  private agentToSession = new Map<string, string>();
+
+  // Cleanup timer IDs for graceful shutdown
+  private cleanupTimers: NodeJS.Timeout[] = [];
+
   constructor(bus: MessageBus, config: ServerConfig) {
     this.bus = bus;
     this.config = config;
@@ -36,8 +45,52 @@ export class StateCache {
 
   /**
    * Register or update an agent
+   * If sessionId is provided, enforces one agent per session (locked identity)
    */
-  registerAgent(name: string, role: string[], version?: string): Agent {
+  registerAgent(name: string, role: string[], version?: string, sessionId?: string): Agent {
+    // If session tracking is enabled, enforce one agent per session
+    if (sessionId !== undefined) {
+      const existingAgentName = this.sessionToAgent.get(sessionId);
+
+      if (existingAgentName !== undefined) {
+        // Session already has an agent - update role/version only
+        // Name is locked to maintain identity
+        const agent = this.agents.get(existingAgentName);
+        if (agent === undefined) {
+          throw new Error(`Session agent ${existingAgentName} not found`);
+        }
+
+        // Update role and version, refresh heartbeat
+        agent.role = role;
+        if (version !== undefined) {
+          agent.version = version;
+        }
+        agent.lastSeen = Date.now();
+        agent.status = 'active';
+
+        console.log(
+          `[StateCache] Agent updated: ${existingAgentName} [${role.join(', ')}] (session locked)`,
+        );
+
+        return agent;
+      }
+
+      // First registration for this session
+      // Check if requested name is already taken by another session
+      if (this.agents.has(name)) {
+        const owningSession = this.agentToSession.get(name);
+        if (owningSession !== undefined && owningSession !== sessionId) {
+          throw new Error(
+            `Agent name "${name}" is already registered by another session. Choose a different name.`,
+          );
+        }
+      }
+
+      // Register new agent with session binding
+      this.sessionToAgent.set(sessionId, name);
+      this.agentToSession.set(name, sessionId);
+    }
+
     const existing = this.agents.get(name);
 
     const agent: Agent = {
@@ -51,7 +104,8 @@ export class StateCache {
     this.agents.set(name, agent);
 
     if (existing === undefined) {
-      console.log(`[StateCache] Agent registered: ${name} [${role.join(', ')}]`);
+      const sessionNote = sessionId !== undefined ? ` (session: ${sessionId.substring(0, 8)}...)` : '';
+      console.log(`[StateCache] Agent registered: ${name} [${role.join(', ')}]${sessionNote}`);
     }
 
     return agent;
@@ -90,10 +144,68 @@ export class StateCache {
   }
 
   /**
-   * Remove agent
+   * Remove agent and cleanup session binding
    */
   removeAgent(name: string): void {
     this.agents.delete(name);
+
+    // Clean up session bindings
+    const sessionId = this.agentToSession.get(name);
+    if (sessionId !== undefined) {
+      this.sessionToAgent.delete(sessionId);
+      this.agentToSession.delete(name);
+    }
+  }
+
+  /**
+   * Get agent name for a given session ID
+   */
+  getAgentForSession(sessionId: string): string | undefined {
+    return this.sessionToAgent.get(sessionId);
+  }
+
+  /**
+   * Get full agent object for a given session ID
+   * This is agent-friendly - makes it easy to get your own agent info!
+   */
+  getAgentBySession(sessionId: string): Agent | undefined {
+    const agentName = this.sessionToAgent.get(sessionId);
+    if (agentName) {
+      return this.agents.get(agentName);
+    }
+    return undefined;
+  }
+
+  /**
+   * Validate that an agent belongs to a specific session
+   * Throws error if agent doesn't exist or belongs to different session
+   */
+  validateAgentOwnership(agentName: string, sessionId: string): void {
+    const agent = this.agents.get(agentName);
+    if (agent === undefined) {
+      throw new Error(`Agent "${agentName}" not found. Register with a.register first.`);
+    }
+
+    const owningSession = this.agentToSession.get(agentName);
+    if (owningSession !== undefined && owningSession !== sessionId) {
+      throw new Error(
+        `Agent "${agentName}" belongs to another session. You can only act as your own registered agent.`,
+      );
+    }
+  }
+
+  /**
+   * Clean up session and associated agent
+   */
+  cleanupSession(sessionId: string): void {
+    const agentName = this.sessionToAgent.get(sessionId);
+    if (agentName !== undefined) {
+      console.log(`[StateCache] Cleaning up session ${sessionId.substring(0, 8)}... (agent: ${agentName})`);
+
+      this.agents.delete(agentName);
+      this.sessionToAgent.delete(sessionId);
+      this.agentToSession.delete(agentName);
+    }
   }
 
   // =========================================================================
@@ -310,19 +422,35 @@ export class StateCache {
    */
   private startCleanupTimers(): void {
     // Clean up expired intents every 30 seconds
-    setInterval(() => {
-      this.cleanupExpiredIntents();
-    }, 30_000);
+    this.cleanupTimers.push(
+      setInterval(() => {
+        this.cleanupExpiredIntents();
+      }, 30_000),
+    );
 
     // Clean up expired leases every 60 seconds
-    setInterval(() => {
-      this.cleanupExpiredLeases();
-    }, 60_000);
+    this.cleanupTimers.push(
+      setInterval(() => {
+        this.cleanupExpiredLeases();
+      }, 60_000),
+    );
 
     // Update agent status every 15 seconds
-    setInterval(() => {
-      this.updateAgentStatus();
-    }, 15_000);
+    this.cleanupTimers.push(
+      setInterval(() => {
+        this.updateAgentStatus();
+      }, 15_000),
+    );
+  }
+
+  /**
+   * Stop all cleanup timers (for graceful shutdown)
+   */
+  stopCleanupTimers(): void {
+    for (const timer of this.cleanupTimers) {
+      clearInterval(timer);
+    }
+    this.cleanupTimers = [];
   }
 
   /**

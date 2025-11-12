@@ -86,7 +86,7 @@ See `.mcp-config/` directory for client-specific setup:
        ├─────────────────┐
        │   AgentHub      │
        │  ┌───────────┐  │
-       │  │ hub.op    │  │ Multi-operation tool
+       │  │ hub_op    │  │ Multi-operation tool
        │  ├───────────┤  │
        │  │ Resources │  │ inbox://, state://
        │  └───────────┘  │
@@ -106,9 +106,9 @@ See `.mcp-config/` directory for client-specific setup:
 
 ## Usage
 
-### The `hub.op` Tool
+### The `hub_op` Tool
 
-All operations go through a single multi-operation tool: `hub.op`
+All operations go through a single multi-operation tool: `hub_op`
 
 ```typescript
 {
@@ -319,7 +319,7 @@ agenthub/
 ├── src/
 │   ├── server/
 │   │   ├── core/            # Core logic (bus, coordinator, watcher)
-│   │   ├── tools/           # hub.op operation handlers
+│   │   ├── tools/           # hub_op operation handlers
 │   │   ├── resources/       # MCP resource handlers
 │   │   ├── transports/      # HTTP transport
 │   │   ├── types/           # TypeScript models

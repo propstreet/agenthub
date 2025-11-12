@@ -190,7 +190,7 @@ export interface EscalationEvent extends BaseEvent {
 export type Event = WriteEvent | IntentEvent | ReviewEvent | EscalationEvent;
 
 // ============================================================================
-// Operation Payloads (hub.op)
+// Operation Payloads (hub_op)
 // ============================================================================
 
 /** m.send payload */
@@ -284,7 +284,7 @@ export type OpPayload =
 // API Response Types
 // ============================================================================
 
-/** Standard hub.op response envelope */
+/** Standard hub_op response envelope */
 export interface HubOpResponse<T = Record<string, unknown>> {
   ok: boolean;
   d?: T;

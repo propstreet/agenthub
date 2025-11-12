@@ -35,7 +35,7 @@ AgentHub only accepts connections from `localhost` by default. If you need to co
 
 After configuring your client, test the connection by:
 
-1. Checking available tools (should see `hub.op`)
+1. Checking available tools (should see `hub_op`)
 2. Checking available resources (should see `inbox://{agent}` and `state://live`)
 3. Trying a simple operation like `s.get` to fetch current state
 

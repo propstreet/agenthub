@@ -6,6 +6,7 @@ import { nanoid } from 'nanoid';
 import type { ReviewRequestPayload, HubOpResponse } from '../types/models.js';
 import type { MessageBus } from '../core/bus.js';
 import type { StateCache } from '../core/state-cache.js';
+import { getCurrentSessionId } from '../session-context.js';
 
 export async function handleReviewRequest(
   bus: MessageBus,
@@ -15,12 +16,22 @@ export async function handleReviewRequest(
   try {
     const data = payload as ReviewRequestPayload;
 
+    // Get agent name from session (or use 'unknown' if no session)
+    const sessionId = getCurrentSessionId();
+    const agentName = sessionId !== undefined ? state.getAgentForSession(sessionId) : undefined;
+    const origin = agentName ?? 'unknown';
+
+    // Validate agent ownership if session exists
+    if (sessionId !== undefined && agentName !== undefined) {
+      state.validateAgentOwnership(agentName, sessionId);
+    }
+
     // Create review job
     const jobId = nanoid(12);
     const reviewJob = {
       id: jobId,
       scope: data.scope,
-      origin: 'manual', // TODO: get actual agent name from context
+      origin,
       status: 'pending' as const,
       createdAt: Date.now(),
       ...(data.summary !== undefined && { summary: data.summary }),
@@ -33,7 +44,7 @@ export async function handleReviewRequest(
       type: 'REVIEW_EVENT',
       action: 'requested',
       jobId,
-      agent: 'manual',
+      agent: origin,
       ts: Date.now(),
     });
 

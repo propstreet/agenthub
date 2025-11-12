@@ -5,14 +5,27 @@
 import type { ExpertAskPayload, HubOpResponse } from '../types/models.js';
 import type { ExpertBridge } from '../core/expert-bridge.js';
 import type { MessageBus } from '../core/bus.js';
+import type { StateCache } from '../core/state-cache.js';
+import { getCurrentSessionId } from '../session-context.js';
 
 export async function handleExpertAsk(
   expert: ExpertBridge,
+  state: StateCache,
   bus: MessageBus,
   payload: unknown,
 ): Promise<HubOpResponse> {
   try {
     const data = payload as ExpertAskPayload;
+
+    // Get agent name from session
+    const sessionId = getCurrentSessionId();
+    const agentName = sessionId !== undefined ? state.getAgentForSession(sessionId) : undefined;
+    const origin = agentName ?? 'unknown';
+
+    // Validate agent ownership if session exists
+    if (sessionId !== undefined && agentName !== undefined) {
+      state.validateAgentOwnership(agentName, sessionId);
+    }
 
     if (!expert.isAvailable()) {
       return {
@@ -27,7 +40,7 @@ export async function handleExpertAsk(
     // Emit escalation event
     bus.emit({
       type: 'ESCALATION_EVENT',
-      agent: 'unknown', // TODO: get from context
+      agent: origin,
       prompt: data.prompt,
       result,
       ts: Date.now(),
@@ -39,10 +52,15 @@ export async function handleExpertAsk(
       t: Date.now(),
     };
   } catch (error) {
+    // Get agent name from session for error event
+    const sessionId = getCurrentSessionId();
+    const agentName = sessionId !== undefined ? state.getAgentForSession(sessionId) : undefined;
+    const origin = agentName ?? 'unknown';
+
     // Emit error event
     bus.emit({
       type: 'ESCALATION_EVENT',
-      agent: 'unknown',
+      agent: origin,
       prompt: (payload as ExpertAskPayload).prompt,
       error: error instanceof Error ? error.message : 'Unknown error',
       ts: Date.now(),

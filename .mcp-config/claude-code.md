@@ -29,10 +29,10 @@ You should see `agenthub` in the list of configured MCP servers.
 
 ## Step 4: Test the connection
 
-Start a Claude Code session and try using the `hub.op` tool:
+Start a Claude Code session and try using the `hub_op` tool:
 
 ```
-Can you use the hub.op tool to get the current state? Use op: "s.get" with an empty payload.
+Can you use the hub_op tool to get the current state? Use op: "s.get" with an empty payload.
 ```
 
 ## Scope Configuration

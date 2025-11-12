@@ -228,6 +228,97 @@ describe('Coordinator - Glob Overlap Detection (P1 Fix)', () => {
       // READ intents should not conflict with each other
       expect(intent2.conflicts).toEqual([]);
     });
+
+    // P1 Bug Fix Tests - Empty base patterns
+    it('should NOT detect overlap: *.ts and src/** (P1 regression test)', () => {
+      // *.ts matches only root-level .ts files (base: "")
+      // src/** matches everything in src directory (base: "src")
+      // These should NOT overlap
+      coordinator.openIntent({
+        agent: 'agent-1',
+        paths: ['*.ts'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      const intent2 = coordinator.openIntent({
+        agent: 'agent-2',
+        paths: ['src/**'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      // BEFORE FIX: conflicts would contain intent1.id (false positive)
+      // AFTER FIX: no conflict because patterns target different directories
+      expect(intent2.conflicts).toEqual([]);
+    });
+
+    it('should NOT detect overlap: *.json and src/** (P1 regression test)', () => {
+      coordinator.openIntent({
+        agent: 'agent-1',
+        paths: ['*.json'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      const intent2 = coordinator.openIntent({
+        agent: 'agent-2',
+        paths: ['src/**'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      expect(intent2.conflicts).toEqual([]);
+    });
+
+    // P1 Bug Fix Tests - Same base but different target files
+    it('should NOT detect overlap: src/**/foo.ts and src/**/bar.ts (P1 regression test)', () => {
+      // Both have base: "src" but target completely different files
+      // src/**/foo.ts can never match the same file as src/**/bar.ts
+      coordinator.openIntent({
+        agent: 'agent-1',
+        paths: ['src/**/foo.ts'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      const intent2 = coordinator.openIntent({
+        agent: 'agent-2',
+        paths: ['src/**/bar.ts'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      // BEFORE FIX: conflicts would contain intent1.id (false positive)
+      // AFTER FIX: no conflict because patterns can never match the same file
+      expect(intent2.conflicts).toEqual([]);
+    });
+
+    it('should NOT detect overlap: src/**/coordinator.ts and src/**/watcher.ts (P1 regression test)', () => {
+      coordinator.openIntent({
+        agent: 'agent-1',
+        paths: ['src/**/coordinator.ts'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      const intent2 = coordinator.openIntent({
+        agent: 'agent-2',
+        paths: ['src/**/watcher.ts'],
+        mode: 'W',
+        priority: 'n',
+        ttlMs: 120000,
+      });
+
+      expect(intent2.conflicts).toEqual([]);
+    });
   });
 
   describe('getActiveIntentsForPath - File path matching', () => {
