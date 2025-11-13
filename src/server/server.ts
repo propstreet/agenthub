@@ -28,6 +28,7 @@ import { handleHelp } from './tools/help.js';
 // Resource handlers
 import { handleInboxResource } from './resources/inbox.js';
 import { handleStateResource } from './resources/state.js';
+import { handleMessagesResource } from './resources/messages.js';
 
 export function createMCPServer(
   bus: MessageBus,
@@ -142,6 +143,48 @@ export function createMCPServer(
             throw new Error(`Unknown operation: ${String(op)}`);
         }
 
+        // Add inbox notification and broadcasts (except for m.pull which already shows messages)
+        if (op !== 'm.pull' && op !== 's.help' && typeof result === 'object' && result !== null) {
+          const agentName =
+            (d['agent'] as string | undefined) ??
+            (d['a'] as string | undefined) ??
+            (d['from'] as string | undefined) ??
+            (d['sender'] as string | undefined);
+
+          if (agentName !== undefined && agentName !== '') {
+            const allMessages = bus.getMessagesFor(agentName);
+
+            // Separate broadcasts from direct messages
+            const broadcasts = allMessages.filter((msg) => msg.to === undefined && msg.from !== agentName);
+            const directMessages = allMessages.filter((msg) => msg.to === agentName);
+
+            const modifiedResult = result as { inbox?: unknown; broadcasts?: unknown };
+
+            // Show recent broadcasts directly (last 3, most recent first)
+            if (broadcasts.length > 0) {
+              const recentBroadcasts = broadcasts
+                .sort((a, b) => b.ts - a.ts)
+                .slice(0, 3)
+                .map((msg) => ({
+                  from: msg.from,
+                  text: msg.text,
+                  topic: msg.topic,
+                  ts: msg.ts,
+                }));
+
+              modifiedResult['broadcasts'] = recentBroadcasts;
+            }
+
+            // Notify about direct messages
+            if (directMessages.length > 0) {
+              modifiedResult['inbox'] = {
+                unread: directMessages.length,
+                hint: `You have ${directMessages.length} direct message${directMessages.length === 1 ? '' : 's'}. Run m.pull to read.`,
+              };
+            }
+          }
+        }
+
         return {
           content: [
             {
@@ -153,9 +196,17 @@ export function createMCPServer(
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // Add helpful hint for common errors
+        let hint: string | undefined;
+        if (errorMessage.includes('required') || errorMessage.includes('Unknown operation')) {
+          hint = 'Try s.help for operation examples and field reference.';
+        }
+
         const errorResult = {
           ok: false,
           error: errorMessage,
+          ...(hint !== undefined && { hint }),
           t: timestamp,
         };
 
@@ -210,6 +261,29 @@ export function createMCPServer(
     },
     async (uri: URL) => {
       const json = handleStateResource(state);
+
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'application/json',
+            text: json,
+          },
+        ],
+      };
+    },
+  );
+
+  // messages://recent - Convenience resource for pulling recent messages
+  server.registerResource(
+    'messages-recent',
+    'messages://recent',
+    {
+      title: 'Recent Messages',
+      description: 'Auto-pulls recent messages for current agent (no config needed)',
+    },
+    async (uri: URL) => {
+      const json = await handleMessagesResource(state, bus);
 
       return {
         contents: [

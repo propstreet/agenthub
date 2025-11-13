@@ -21,6 +21,7 @@ const MessageSendRawSchema = z.object({
       'review.claimed',
       'review.completed',
       'supervision.requested',
+      'supervision.announcement',
     ])
     .optional(),
   // Topic (deprecated, use type)
@@ -71,12 +72,9 @@ export const MessagePullSchema = MessagePullRawSchema.transform((raw) => {
   const { since } = raw;
   const { limit } = raw;
 
-  if (agent === undefined) {
-    throw new Error('agent required. Specify which agent to pull messages for.');
-  }
-
+  // Agent is now optional - will be auto-populated from session in handler
   return {
-    agent,
+    ...(agent !== undefined && { agent }),
     ...(since !== undefined && { since }),
     ...(limit !== undefined && { limit }),
   };

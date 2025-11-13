@@ -48,7 +48,8 @@ export type MessageType =
   | 'review.requested' // Review needs claiming
   | 'review.claimed' // Review was claimed
   | 'review.completed' // Review finished
-  | 'supervision.requested'; // Human intervention needed
+  | 'supervision.requested' // Agent → Human (asking for help)
+  | 'supervision.announcement'; // Human → Agents (broadcast)
 
 // ============================================================================
 // Core Models

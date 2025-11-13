@@ -79,15 +79,39 @@ export async function handleMessagePull(
   console.log(`[m.pull] Starting at ${startTime}`);
 
   try {
-    const data = MessagePullSchema.parse(payload);
-    console.log(`[m.pull] Payload parsed: agent=${data.agent}, since=${data.since ?? 'undefined'}`);
+    // Parse payload (agent field is optional now)
+    const parsedData = MessagePullSchema.parse(payload);
 
-    // Validate agent ownership (agent field is the recipient)
+    // Auto-populate agent from session if not provided
+    let { agent } = parsedData;
     const sessionId = getCurrentSessionId();
+
+    if (agent === undefined && sessionId !== undefined) {
+      const sessionAgent = state.getAgentBySession(sessionId);
+      if (sessionAgent !== undefined) {
+        agent = sessionAgent.name;
+        console.log(`[m.pull] Auto-populated agent from session: ${agent}`);
+      }
+    }
+
+    if (agent === undefined) {
+      throw new Error('Agent required. Provide "agent" field or register with a.register first.');
+    }
+
+    const data: { agent: string; since?: number; limit?: number } = {
+      agent,
+      ...(parsedData.since !== undefined && { since: parsedData.since }),
+      ...(parsedData.limit !== undefined && { limit: parsedData.limit }),
+    };
+
+    console.log(
+      `[m.pull] Pulling messages for agent=${data.agent}, since=${data.since ?? 'undefined'}`,
+    );
     console.log(
       `[m.pull] Session ID: ${sessionId !== undefined ? sessionId.substring(0, 8) : 'none'}...`,
     );
 
+    // Validate agent ownership (agent field is the recipient)
     if (sessionId !== undefined) {
       const validateStart = Date.now();
       state.validateAgentOwnership(data.agent, sessionId);

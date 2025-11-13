@@ -255,7 +255,7 @@ export async function handleHelp(): Promise<HubOpResponse> {
         },
         {
           name: 'type',
-          type: 'chat | review.requested | review.claimed | review.completed | supervision.requested',
+          type: 'chat | review.requested | review.claimed | review.completed | supervision.requested | supervision.announcement',
           required: false,
           default: 'chat',
           description: 'Message type for filtering',
@@ -490,7 +490,8 @@ export async function handleHelp(): Promise<HubOpResponse> {
         'Canonical field names are preferred in examples and docs',
         'All timestamps are Unix milliseconds',
         'Priority: r > h > n > l (required > high > normal > low)',
-        'Message types: chat (default), review.requested, review.claimed, review.completed, supervision.requested',
+        'Message types: chat (default), review.requested, review.claimed, review.completed, supervision.requested, supervision.announcement',
+        'supervision.requested: agent → human (asking for help), supervision.announcement: human → agents (broadcast)',
         'Filter messages by type: messages.filter(m => m.type === "review.requested")',
         'Review notifications come from requesting agent (not system)',
         'Use data field for structured message payloads (programmatic access)',

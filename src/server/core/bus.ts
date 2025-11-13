@@ -65,6 +65,15 @@ export class MessageBus {
   }
 
   /**
+   * Get unread message count for an agent (for inbox notifications)
+   */
+  getMessagesFor(agent: string): Msg[] {
+    return this.messages.filter(
+      (msg) => msg.to === agent || (msg.to === undefined && msg.from !== agent),
+    );
+  }
+
+  /**
    * Emit an event to the bus
    */
   emit(event: Event): void {
