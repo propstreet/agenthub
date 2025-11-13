@@ -15,7 +15,13 @@ const MessageSendRawSchema = z.object({
   target: z.string().optional(),
   // Type: message type for filtering
   type: z
-    .enum(['chat', 'review.requested', 'review.claimed', 'review.completed', 'supervision.requested'])
+    .enum([
+      'chat',
+      'review.requested',
+      'review.claimed',
+      'review.completed',
+      'supervision.requested',
+    ])
     .optional(),
   // Topic (deprecated, use type)
   topic: z.string().optional(),

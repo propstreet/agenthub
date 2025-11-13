@@ -22,12 +22,19 @@ export async function handleExpertAsk(
     // Get agent name from session
     const sessionId = getCurrentSessionId();
     const agentName = sessionId !== undefined ? state.getAgentForSession(sessionId) : undefined;
-    const origin = agentName ?? 'unknown';
 
-    // Validate agent ownership if session exists
-    if (sessionId !== undefined && agentName !== undefined) {
-      state.validateAgentOwnership(agentName, sessionId);
+    // Require agent registration for expert escalation
+    if (agentName === undefined || sessionId === undefined) {
+      return {
+        ok: false,
+        error: 'Agent required. Register with a.register before using expert.ask',
+        t: Date.now(),
+      };
     }
+
+    // Validate agent ownership
+    state.validateAgentOwnership(agentName, sessionId);
+    const origin = agentName;
 
     if (!expert.isAvailable()) {
       return {
@@ -54,19 +61,20 @@ export async function handleExpertAsk(
       t: Date.now(),
     };
   } catch (error) {
-    // Get agent name from session for error event
+    // Get agent name from session for error event (only if validation passed)
     const sessionId = getCurrentSessionId();
     const agentName = sessionId !== undefined ? state.getAgentForSession(sessionId) : undefined;
-    const origin = agentName ?? 'unknown';
 
-    // Emit error event
-    bus.emit({
-      type: 'ESCALATION_EVENT',
-      agent: origin,
-      prompt: (payload as { prompt?: string }).prompt ?? 'unknown',
-      error: error instanceof Error ? error.message : 'Unknown error',
-      ts: Date.now(),
-    });
+    // Only emit error event if agent is registered (validation errors happen before registration check)
+    if (agentName !== undefined) {
+      bus.emit({
+        type: 'ESCALATION_EVENT',
+        agent: agentName,
+        prompt: (payload as { prompt?: string }).prompt ?? 'unknown',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        ts: Date.now(),
+      });
+    }
 
     return {
       ok: false,

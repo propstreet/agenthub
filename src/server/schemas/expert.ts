@@ -41,7 +41,7 @@ export const ExpertAskSchema = ExpertAskRawSchema.transform((raw) => {
 
   if (prompt === undefined || prompt.trim() === '') {
     throw new Error(
-      'question required. Example: {"question": "How can I optimize this?", "paths": ["file.ts"]}'
+      'question required. Example: {"question": "How can I optimize this?", "paths": ["file.ts"]}',
     );
   }
 

@@ -8,14 +8,13 @@
  * 3. Guidance Request - Specific recommendations needed
  */
 
-import { AzureOpenAI } from 'openai';
-import { getBearerTokenProvider, DefaultAzureCredential } from '@azure/identity';
+import OpenAI from 'openai';
 import { readFileSync, existsSync } from 'fs';
 import { extname, basename, resolve } from 'path';
 import type { ExpertAskPayload, ServerConfig } from '../types/models.js';
 
 export class ExpertBridge {
-  private client: AzureOpenAI | null = null;
+  private client: OpenAI | null = null;
   private config: ServerConfig;
   private isConfigured = false;
 
@@ -39,27 +38,26 @@ export class ExpertBridge {
 
     try {
       if (apiKey !== undefined && apiKey.length > 0) {
-        // API Key authentication
-        this.client = new AzureOpenAI({
+        // API Key authentication with v1 endpoint
+        // Use standard OpenAI client with Azure v1 baseURL
+        this.client = new OpenAI({
           apiKey,
-          endpoint,
-          apiVersion: '2024-10-01-preview',
+          baseURL: `${endpoint}/openai/v1/`,
+          defaultHeaders: {
+            'api-key': apiKey, // Azure requires 'api-key' header
+          },
         });
 
-        console.log('[ExpertBridge] Initialized with API key authentication');
+        console.log(`[ExpertBridge] Initialized with API key authentication (v1 endpoint)`);
       } else {
         // Entra ID (Azure AD) authentication
-        const credential = new DefaultAzureCredential();
-        const scope = 'https://cognitiveservices.azure.com/.default';
-        const azureADTokenProvider = getBearerTokenProvider(credential, scope);
-
-        this.client = new AzureOpenAI({
-          azureADTokenProvider,
-          endpoint,
-          apiVersion: '2024-10-01-preview',
-        });
-
-        console.log('[ExpertBridge] Initialized with Entra ID authentication');
+        // Note: v1 endpoint with Entra ID not yet supported
+        // Recommend using API key for expert.ask
+        console.warn(
+          '[ExpertBridge] Entra ID authentication not supported for v1 endpoint yet. Please use AZURE_OPENAI_API_KEY.',
+        );
+        this.isConfigured = false;
+        return;
       }
 
       this.isConfigured = true;
@@ -70,32 +68,69 @@ export class ExpertBridge {
   }
 
   /**
-   * Detect MIME type from file extension
+   * Detect programming language from file extension for syntax highlighting
+   * Based on claude-powerpack:ask-expert pattern
    */
-  private detectMimeType(filePath: string): string {
+  private detectLanguage(filePath: string): string {
     const ext = extname(filePath).toLowerCase();
-    const mimeMap: Record<string, string> = {
-      '.pdf': 'application/pdf',
-      '.ts': 'text/x-typescript',
-      '.tsx': 'text/x-typescript',
-      '.js': 'text/javascript',
-      '.jsx': 'text/javascript',
-      '.json': 'application/json',
-      '.md': 'text/markdown',
-      '.txt': 'text/plain',
-      '.py': 'text/x-python',
-      '.sh': 'text/x-shellscript',
-      '.yaml': 'text/yaml',
-      '.yml': 'text/yaml',
+    const langMap: Record<string, string> = {
+      '.cs': 'csharp',
+      '.ts': 'typescript',
+      '.tsx': 'tsx',
+      '.js': 'javascript',
+      '.jsx': 'jsx',
+      '.json': 'json',
+      '.md': 'markdown',
+      '.sql': 'sql',
+      '.html': 'html',
+      '.css': 'css',
+      '.scss': 'scss',
+      '.xml': 'xml',
+      '.yaml': 'yaml',
+      '.yml': 'yaml',
+      '.sh': 'bash',
+      '.py': 'python',
+      '.vue': 'vue',
+      '.txt': 'text',
     };
-    return mimeMap[ext] ?? 'text/plain';
+    return langMap[ext] ?? 'text';
   }
 
+  /**
+   * Check if file is a PDF
+   */
+  private isPDF(filePath: string): boolean {
+    return extname(filePath).toLowerCase() === '.pdf';
+  }
 
   /**
-   * Read file and convert to base64 data URL for Responses API
+   * Format code file as markdown code block
+   * Based on claude-powerpack:ask-expert pattern
    */
-  private readFileAsBase64DataURL(filePath: string): {
+  private formatCodeAsMarkdown(filePath: string): string | null {
+    try {
+      const absolutePath = resolve(filePath);
+
+      if (!existsSync(absolutePath)) {
+        console.warn(`[ExpertBridge] File not found: ${absolutePath}`);
+        return null;
+      }
+
+      const content = readFileSync(absolutePath, 'utf8');
+      const language = this.detectLanguage(filePath);
+
+      return `# File: ${filePath}\n\`\`\`${language}\n${content}\n\`\`\``;
+    } catch (error) {
+      console.error(`[ExpertBridge] Error reading file ${filePath}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Read PDF file and convert to base64 data URL for Responses API
+   * Only PDFs are supported as input_file attachments
+   */
+  private readPDFAsBase64DataURL(filePath: string): {
     filename: string;
     file_data: string;
   } | null {
@@ -109,25 +144,24 @@ export class ExpertBridge {
 
       const content = readFileSync(absolutePath);
       const base64 = content.toString('base64');
-      const mimeType = this.detectMimeType(filePath);
       const filename = basename(filePath);
 
       return {
         filename,
-        file_data: `data:${mimeType};base64,${base64}`,
+        file_data: `data:application/pdf;base64,${base64}`,
       };
     } catch (error) {
-      console.error(`[ExpertBridge] Error reading file ${filePath}:`, error);
+      console.error(`[ExpertBridge] Error reading PDF ${filePath}:`, error);
       return null;
     }
   }
 
   /**
-   * Ask the expert for help using Responses API with base64 file attachments
+   * Ask the expert for help using Responses API
    *
-   * Follows proven GPT-5-Pro consultation pattern:
-   * 1. Question (input_text)
-   * 2. Code files (input_file with base64)
+   * Follows proven GPT-5-Pro consultation pattern (claude-powerpack:ask-expert):
+   * 1. Question + code context formatted as markdown (input_text)
+   * 2. PDF files only as attachments (input_file with base64)
    * 3. Guidance request in instructions
    */
   async ask(payload: ExpertAskPayload): Promise<string> {
@@ -145,34 +179,68 @@ export class ExpertBridge {
       console.log(`[ExpertBridge] Asking expert: ${prompt.slice(0, 100)}...`);
       console.log(`[ExpertBridge] Analyzing ${files.length} file(s)`);
 
-      // Build content array: question text + file attachments
-      const content: Array<
+      // Separate PDFs from code files
+      const pdfFiles: string[] = [];
+      const codeFiles: string[] = [];
+
+      for (const file of files) {
+        if (this.isPDF(file)) {
+          pdfFiles.push(file);
+        } else {
+          codeFiles.push(file);
+        }
+      }
+
+      // Build input_text: prompt + code files as markdown
+      // Each file gets its own heading (# File: {path}) - no generic section header needed
+      const textParts: string[] = [prompt];
+
+      if (codeFiles.length > 0) {
+        let codeFilesIncluded = 0;
+
+        for (const file of codeFiles) {
+          const formatted = this.formatCodeAsMarkdown(file);
+          if (formatted !== null) {
+            textParts.push(`\n\n${formatted}`);
+            codeFilesIncluded++;
+          }
+        }
+
+        console.log(`[ExpertBridge] Included ${codeFilesIncluded}/${codeFiles.length} code files`);
+      }
+
+      const inputText = textParts.join('');
+
+      // Build content array: text + PDF attachments
+      const content: (
         | { type: 'input_text'; text: string }
         | { type: 'input_file'; filename: string; file_data: string }
-      > = [
+      )[] = [
         {
           type: 'input_text',
-          text: prompt,
+          text: inputText,
         },
       ];
 
-      // Add each file as base64 attachment
-      let filesAttached = 0;
-      for (const file of files) {
-        const fileData = this.readFileAsBase64DataURL(file);
+      // Add PDF files as base64 attachments
+      let pdfsAttached = 0;
+      for (const file of pdfFiles) {
+        const fileData = this.readPDFAsBase64DataURL(file);
         if (fileData !== null) {
           content.push({
             type: 'input_file',
             filename: fileData.filename,
             file_data: fileData.file_data,
           });
-          filesAttached++;
+          pdfsAttached++;
         }
       }
 
-      console.log(`[ExpertBridge] Attached ${filesAttached}/${files.length} files`);
+      if (pdfsAttached > 0) {
+        console.log(`[ExpertBridge] Attached ${pdfsAttached}/${pdfFiles.length} PDF files`);
+      }
 
-      // Use correct Responses API structure with file attachments
+      // Use correct Responses API structure
       const response = await this.client.responses.create({
         model: this.config.azureOpenAI.deployment,
         input: [
@@ -189,7 +257,7 @@ export class ExpertBridge {
       });
 
       // Extract clean text output
-      const output = response.output_text ?? JSON.stringify(response.output, null, 2);
+      const output = response.output_text;
 
       console.log(`[ExpertBridge] Expert response received (${output.length} chars)`);
 
