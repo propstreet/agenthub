@@ -32,6 +32,14 @@ describe('AgentRegisterSchema', () => {
     expect(result.role).toEqual(['builder']);
   });
 
+  it('normalizes roles variant (roles → role)', () => {
+    const result = AgentRegisterSchema.parse({
+      roles: ['coder', 'reviewer'],
+    });
+
+    expect(result.role).toEqual(['coder', 'reviewer']);
+  });
+
   it('normalizes version variant (v → version)', () => {
     const result = AgentRegisterSchema.parse({
       role: ['editor'],
@@ -45,6 +53,7 @@ describe('AgentRegisterSchema', () => {
     const result = AgentRegisterSchema.parse({
       role: ['editor'],
       r: ['tester'], // should be ignored
+      roles: ['coder'], // should be ignored
       version: '1.0.0',
       v: '2.0.0', // should be ignored
     });

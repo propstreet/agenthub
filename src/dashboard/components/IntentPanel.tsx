@@ -73,15 +73,15 @@ export function IntentPanel({ intents }: IntentPanelProps) {
         <Box flexDirection="column">
           {intents.map((intent) => (
             <Box key={intent.id}>
-              <Text dimColor>{truncate(intent.id, 12)} </Text>
-              <Text>{truncate(intent.agent, 17)} </Text>
+              <Text dimColor>{truncate(intent.id, 15)}</Text>
+              <Text> {truncate(intent.agent, 17)}</Text>
               <Text color={getModeColor(intent.mode)}>
+                {' '}
                 {getModeIcon(intent.mode)} {intent.mode}
               </Text>
-              <Text> </Text>
-              <Text dimColor>{truncate(intent.paths[0] ?? '(no paths)', 20)} </Text>
-              <Text color={getTTLColor(intent)}>TTL: {getTTLRemaining(intent).padEnd(5)}</Text>
-              {hasConflicts(intent) && <Text color="red"> ⚠️{intent.conflicts?.length}</Text>}
+              <Text dimColor> {truncate(intent.paths[0] ?? '(no paths)', 18)}</Text>
+              <Text color={getTTLColor(intent)}> TTL: {getTTLRemaining(intent)}</Text>
+              {hasConflicts(intent) && <Text color="red"> ⚠️</Text>}
             </Box>
           ))}
         </Box>

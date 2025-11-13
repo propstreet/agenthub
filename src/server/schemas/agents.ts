@@ -19,9 +19,10 @@ const AgentRegisterRawSchema = z.object({
   // Name (optional - will be generated if not provided)
   name: z.string().optional(),
 
-  // Role variants: role, r
+  // Role variants: role, r, roles
   role: z.array(z.string()).optional(),
   r: z.array(z.string()).optional(),
+  roles: z.array(z.string()).optional(),
 
   // Version (optional)
   version: z.string().optional(),
@@ -37,7 +38,7 @@ const AgentRegisterRawSchema = z.object({
 export const AgentRegisterSchema = AgentRegisterRawSchema.transform((raw) => {
   // Normalize variants
   const { name } = raw;
-  const role = raw.role ?? raw.r;
+  const role = raw.role ?? raw.r ?? raw.roles;
   const version = raw.version ?? raw.v;
 
   // Validate required fields

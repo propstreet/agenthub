@@ -13,6 +13,7 @@ export function Controls({ paused }: ControlsProps) {
     <Box borderStyle="single" borderColor="gray" padding={1} marginTop={1}>
       {paused && <Text dimColor>[R]efresh </Text>}
       <Text dimColor>[P]ause </Text>
+      <Text dimColor>[M]essages </Text>
       <Text dimColor>[B]roadcast </Text>
       <Text dimColor>[Q]uit</Text>
     </Box>

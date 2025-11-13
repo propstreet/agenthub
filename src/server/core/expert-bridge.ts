@@ -2,10 +2,12 @@
  * Expert Bridge - Azure OpenAI Responses API integration
  * Handles escalation to GPT-5 Pro for complex issues
  *
- * Formats consultation documents following proven GPT-5-Pro structure:
+ * Uses Azure OpenAI v1 API endpoint (no api-version needed)
+ * Formats code as markdown following claude-powerpack:ask-expert pattern:
  * 1. Question - Clear problem statement
- * 2. Code Context - Full files formatted as markdown with syntax highlighting
- * 3. Guidance Request - Specific recommendations needed
+ * 2. Code files - Formatted as markdown code blocks (# File: {path})
+ * 3. PDF files - Attached as base64 input_file
+ * 4. Guidance - Specific recommendations from GPT-5 Pro
  */
 
 import OpenAI from 'openai';
