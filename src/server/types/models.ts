@@ -12,6 +12,7 @@ import type {
 import type { StateGetPayload } from '../schemas/state.js';
 import type { LeaseAnnouncePayload } from '../schemas/leases.js';
 import type { MessageSendPayload, MessagePullPayload } from '../schemas/messages.js';
+import type { ExpertAskPayload } from '../schemas/expert.js';
 
 // ============================================================================
 // Base Types
@@ -40,6 +41,14 @@ export type ReviewStatus = 'pending' | 'claimed' | 'completed' | 'failed';
 
 /** Severity levels for review findings */
 export type Severity = 'info' | 'warning' | 'error' | 'critical';
+
+/** Message type for filtering and routing */
+export type MessageType =
+  | 'chat' // Default user messages
+  | 'review.requested' // Review needs claiming
+  | 'review.claimed' // Review was claimed
+  | 'review.completed' // Review finished
+  | 'supervision.requested'; // Human intervention needed
 
 // ============================================================================
 // Core Models
@@ -109,11 +118,15 @@ export interface Msg {
   from: string;
   /** Recipient agent (undefined = broadcast) */
   to?: string;
-  /** Message topic/type */
+  /** Message type for filtering */
+  type: MessageType;
+  /** Message topic (deprecated, use type) */
   topic: string;
   /** Message content */
   text: string;
-  /** Optional attachments (JSON data) */
+  /** Structured payload for programmatic access */
+  data?: unknown;
+  /** Optional attachments (deprecated, use data) */
   att?: Record<string, unknown>;
 }
 
@@ -230,13 +243,8 @@ export interface ReviewRequestPayload {
   summary?: string;
 }
 
-/** x.ask payload */
-export interface ExpertAskPayload {
-  prompt: string;
-  files: string[];
-  effort?: 'minimal' | 'medium' | 'high';
-  verb?: 'low' | 'medium' | 'high'; // verbosity
-}
+/** expert.ask payload (from Zod schema) */
+export type { ExpertAskPayload };
 
 /** s.get payload (from Zod schema) */
 export type { StateGetPayload };

@@ -1,11 +1,12 @@
 /**
- * Expert escalation handler (x.ask)
+ * Expert escalation handler (expert.ask)
  */
 
-import type { ExpertAskPayload, HubOpResponse } from '../types/models.js';
+import type { HubOpResponse } from '../types/models.js';
 import type { ExpertBridge } from '../core/expert-bridge.js';
 import type { MessageBus } from '../core/bus.js';
 import type { StateCache } from '../core/state-cache.js';
+import { ExpertAskSchema } from '../schemas/expert.js';
 import { getCurrentSessionId } from '../session-context.js';
 
 export async function handleExpertAsk(
@@ -15,7 +16,8 @@ export async function handleExpertAsk(
   payload: unknown,
 ): Promise<HubOpResponse> {
   try {
-    const data = payload as ExpertAskPayload;
+    // Validate and normalize payload with schema
+    const data = ExpertAskSchema.parse(payload);
 
     // Get agent name from session
     const sessionId = getCurrentSessionId();
@@ -61,7 +63,7 @@ export async function handleExpertAsk(
     bus.emit({
       type: 'ESCALATION_EVENT',
       agent: origin,
-      prompt: (payload as ExpertAskPayload).prompt,
+      prompt: (payload as { prompt?: string }).prompt ?? 'unknown',
       error: error instanceof Error ? error.message : 'Unknown error',
       ts: Date.now(),
     });

@@ -348,6 +348,7 @@ export function createHttpTransport(
       const msg = bus.send({
         from: 'dashboard',
         // Omit 'to' field for broadcast (not set to undefined)
+        type: 'chat',
         topic,
         text,
       });

@@ -13,21 +13,28 @@ const MessageSendRawSchema = z.object({
   // To variants: to (canonical), target (alias)
   to: z.string().optional(),
   target: z.string().optional(),
-  // Topic (no variants)
+  // Type: message type for filtering
+  type: z
+    .enum(['chat', 'review.requested', 'review.claimed', 'review.completed', 'supervision.requested'])
+    .optional(),
+  // Topic (deprecated, use type)
   topic: z.string().optional(),
   // Text variants: text (canonical), msg (alias)
   text: z.string().optional(),
   msg: z.string().optional(),
-  // Attachments (no variants)
+  // Data: structured payload for programmatic access
+  data: z.unknown().optional(),
+  // Attachments (deprecated, use data)
   att: z.record(z.unknown()).optional(),
 });
 
 export const MessageSendSchema = MessageSendRawSchema.transform((raw) => {
   const from = raw.from ?? raw.agent;
   const to = raw.to ?? raw.target;
+  const type = raw.type ?? 'chat';
   const topic = raw.topic ?? 'general';
   const text = raw.text ?? raw.msg;
-  const { att } = raw;
+  const { data, att } = raw;
 
   if (text === undefined) {
     throw new Error('text required. Provide message content.');
@@ -36,8 +43,10 @@ export const MessageSendSchema = MessageSendRawSchema.transform((raw) => {
   return {
     ...(from !== undefined && { from }),
     ...(to !== undefined && { to }),
+    type,
     topic,
     text,
+    ...(data !== undefined && { data }),
     ...(att !== undefined && { att }),
   };
 });

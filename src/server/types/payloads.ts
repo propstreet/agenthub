@@ -4,7 +4,7 @@
  * Used by core methods (bus.send, coordinator methods) which expect required fields
  */
 
-import type { Mode, Priority, Vote } from './models.js';
+import type { Mode, Priority, Vote, MessageType } from './models.js';
 
 /**
  * Resolved payload for bus.send()
@@ -13,9 +13,11 @@ import type { Mode, Priority, Vote } from './models.js';
 export interface ResolvedMessageSendPayload {
   from: string; // Required - resolved from session if needed
   to?: string;
+  type: MessageType; // Message type for filtering
   topic: string;
   text: string;
-  att?: Record<string, unknown>;
+  data?: unknown; // Structured payload for programmatic access
+  att?: Record<string, unknown>; // Deprecated, use data
 }
 
 /**

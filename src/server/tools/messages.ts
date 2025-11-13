@@ -35,14 +35,18 @@ export async function handleMessageSend(
     const data: {
       from: string;
       to?: string;
+      type: import('../types/models.js').MessageType;
       topic: string;
       text: string;
+      data?: unknown;
       att?: Record<string, unknown>;
     } = {
       from: sender,
+      type: normalized.type,
       topic: normalized.topic,
       text: normalized.text,
       ...(normalized.to !== undefined && { to: normalized.to }),
+      ...(normalized.data !== undefined && { data: normalized.data }),
       ...(normalized.att !== undefined && { att: normalized.att }),
     };
 

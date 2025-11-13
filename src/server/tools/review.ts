@@ -50,11 +50,36 @@ export async function handleReviewRequest(
       ts: Date.now(),
     });
 
+    // Auto-notify all reviewer-role agents with review.requested message
+    // Message comes FROM origin agent (not 'system')
+    const reviewers = state.getAgentsByRole('reviewer');
+    let notifiedCount = 0;
+    for (const reviewer of reviewers) {
+      if (reviewer.status === 'active' || reviewer.status === 'idle') {
+        bus.send({
+          from: origin,
+          to: reviewer.name,
+          type: 'review.requested',
+          topic: 'review',
+          text: `Review requested: ${data.scope.slice(0, 2).join(', ')}${data.scope.length > 2 ? '...' : ''}`,
+          data: {
+            jobId,
+            scope: data.scope,
+            ...(data.summary !== undefined && { summary: data.summary }),
+            origin,
+            createdAt: Date.now(),
+          },
+        });
+        notifiedCount++;
+      }
+    }
+
     console.log(`[Review] Review job created: ${jobId} for scope: ${data.scope.join(', ')}`);
+    console.log(`[Review] Notified ${notifiedCount} reviewers`);
 
     return {
       ok: true,
-      d: { jobId },
+      d: { jobId, notifiedReviewers: notifiedCount },
       t: Date.now(),
     };
   } catch (error) {
@@ -128,7 +153,22 @@ export async function handleReviewClaim(
       ts: Date.now(),
     });
 
-    console.log(`[Review] Job ${data.jobId} claimed by ${agentName}`);
+    // Notify origin agent that review was claimed
+    bus.send({
+      from: agentName,
+      to: job.origin,
+      type: 'review.claimed',
+      topic: 'review',
+      text: `Review claimed: ${job.scope.slice(0, 2).join(', ')}${job.scope.length > 2 ? '...' : ''}`,
+      data: {
+        jobId: data.jobId,
+        claimedBy: agentName,
+        scope: job.scope,
+        ts: Date.now(),
+      },
+    });
+
+    console.log(`[Review] Job ${data.jobId} claimed by ${agentName}, notified ${job.origin}`);
 
     return {
       ok: true,
@@ -189,14 +229,16 @@ export async function handleReviewComplete(
     }
 
     // Update job with findings
+    const findings = {
+      sev: data.severity,
+      notes: data.notes,
+      ...(data.patch !== undefined && { patch: data.patch }),
+      ts: Date.now(),
+    };
+
     state.updateReviewJob(data.jobId, {
       status: 'completed',
-      findings: {
-        sev: data.severity,
-        notes: data.notes,
-        ...(data.patch !== undefined && { patch: data.patch }),
-        ts: Date.now(),
-      },
+      findings,
     });
 
     // Emit review event
@@ -208,8 +250,26 @@ export async function handleReviewComplete(
       ts: Date.now(),
     });
 
+    // Notify origin agent with review results
+    bus.send({
+      from: agentName,
+      to: job.origin,
+      type: 'review.completed',
+      topic: 'review',
+      text: `Review completed: ${job.scope.slice(0, 2).join(', ')}${job.scope.length > 2 ? '...' : ''} (${data.severity})`,
+      data: {
+        jobId: data.jobId,
+        reviewer: agentName,
+        scope: job.scope,
+        severity: data.severity,
+        notes: data.notes,
+        ...(data.patch !== undefined && { patch: data.patch }),
+        ts: Date.now(),
+      },
+    });
+
     console.log(
-      `[Review] Job ${data.jobId} completed by ${agentName} with severity: ${data.severity}`,
+      `[Review] Job ${data.jobId} completed by ${agentName} with severity: ${data.severity}, notified ${job.origin}`,
     );
 
     return {

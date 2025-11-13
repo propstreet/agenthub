@@ -1,10 +1,17 @@
 /**
  * Expert Bridge - Azure OpenAI Responses API integration
  * Handles escalation to GPT-5 Pro for complex issues
+ *
+ * Formats consultation documents following proven GPT-5-Pro structure:
+ * 1. Question - Clear problem statement
+ * 2. Code Context - Full files formatted as markdown with syntax highlighting
+ * 3. Guidance Request - Specific recommendations needed
  */
 
 import { AzureOpenAI } from 'openai';
 import { getBearerTokenProvider, DefaultAzureCredential } from '@azure/identity';
+import { readFileSync, existsSync } from 'fs';
+import { extname, basename, resolve } from 'path';
 import type { ExpertAskPayload, ServerConfig } from '../types/models.js';
 
 export class ExpertBridge {
@@ -63,8 +70,65 @@ export class ExpertBridge {
   }
 
   /**
-   * Ask the expert for help
-   * Returns unified diffs and minimal notes
+   * Detect MIME type from file extension
+   */
+  private detectMimeType(filePath: string): string {
+    const ext = extname(filePath).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.ts': 'text/x-typescript',
+      '.tsx': 'text/x-typescript',
+      '.js': 'text/javascript',
+      '.jsx': 'text/javascript',
+      '.json': 'application/json',
+      '.md': 'text/markdown',
+      '.txt': 'text/plain',
+      '.py': 'text/x-python',
+      '.sh': 'text/x-shellscript',
+      '.yaml': 'text/yaml',
+      '.yml': 'text/yaml',
+    };
+    return mimeMap[ext] ?? 'text/plain';
+  }
+
+
+  /**
+   * Read file and convert to base64 data URL for Responses API
+   */
+  private readFileAsBase64DataURL(filePath: string): {
+    filename: string;
+    file_data: string;
+  } | null {
+    try {
+      const absolutePath = resolve(filePath);
+
+      if (!existsSync(absolutePath)) {
+        console.warn(`[ExpertBridge] File not found: ${absolutePath}`);
+        return null;
+      }
+
+      const content = readFileSync(absolutePath);
+      const base64 = content.toString('base64');
+      const mimeType = this.detectMimeType(filePath);
+      const filename = basename(filePath);
+
+      return {
+        filename,
+        file_data: `data:${mimeType};base64,${base64}`,
+      };
+    } catch (error) {
+      console.error(`[ExpertBridge] Error reading file ${filePath}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Ask the expert for help using Responses API with base64 file attachments
+   *
+   * Follows proven GPT-5-Pro consultation pattern:
+   * 1. Question (input_text)
+   * 2. Code files (input_file with base64)
+   * 3. Guidance request in instructions
    */
   async ask(payload: ExpertAskPayload): Promise<string> {
     if (!this.isConfigured || this.client === null) {
@@ -79,43 +143,53 @@ export class ExpertBridge {
 
     try {
       console.log(`[ExpertBridge] Asking expert: ${prompt.slice(0, 100)}...`);
+      console.log(`[ExpertBridge] Analyzing ${files.length} file(s)`);
 
-      // Read files if they're paths (in real implementation)
-      // For now, assume files is array of paths
-      const filesContent: Record<string, string> = {};
+      // Build content array: question text + file attachments
+      const content: Array<
+        | { type: 'input_text'; text: string }
+        | { type: 'input_file'; filename: string; file_data: string }
+      > = [
+        {
+          type: 'input_text',
+          text: prompt,
+        },
+      ];
 
-      // In a real implementation, you'd read these files
-      // For now, we'll just pass them as-is
+      // Add each file as base64 attachment
+      let filesAttached = 0;
       for (const file of files) {
-        filesContent[file] = `<content of ${file}>`;
+        const fileData = this.readFileAsBase64DataURL(file);
+        if (fileData !== null) {
+          content.push({
+            type: 'input_file',
+            filename: fileData.filename,
+            file_data: fileData.file_data,
+          });
+          filesAttached++;
+        }
       }
 
+      console.log(`[ExpertBridge] Attached ${filesAttached}/${files.length} files`);
+
+      // Use correct Responses API structure with file attachments
       const response = await this.client.responses.create({
         model: this.config.azureOpenAI.deployment,
         input: [
           {
-            role: 'developer',
-            content:
-              'You are a code expert. Analyze the issue and return unified diffs + minimal notes for fixing the problem. Be concise.',
-          },
-          {
             role: 'user',
-            content: prompt,
-          },
-          {
-            role: 'user',
-            content: `Files:\n${JSON.stringify(filesContent, null, 2)}`,
+            content,
           },
         ],
+        instructions:
+          'You are a code architecture expert. Analyze the code and question, then provide specific, actionable recommendations. Be concise and focus on the most important issues. Use markdown formatting for code snippets.',
         text: { verbosity: verb },
         reasoning: { effort },
-        max_output_tokens: 2000,
+        max_output_tokens: 4000,
       });
 
-      // Extract text from output
-      // The Responses API returns a complex output structure
-      // For now, return the stringified response
-      const output = JSON.stringify(response.output, null, 2);
+      // Extract clean text output
+      const output = response.output_text ?? JSON.stringify(response.output, null, 2);
 
       console.log(`[ExpertBridge] Expert response received (${output.length} chars)`);
 

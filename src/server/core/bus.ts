@@ -26,8 +26,10 @@ export class MessageBus {
       ts: Date.now(),
       from: payload.from,
       ...(payload.to !== undefined && { to: payload.to }),
+      type: payload.type,
       topic: payload.topic,
       text: payload.text,
+      ...(payload.data !== undefined && { data: payload.data }),
       ...(payload.att !== undefined && { att: payload.att }),
     };
 

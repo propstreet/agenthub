@@ -142,6 +142,7 @@ export class Coordinator {
       this.bus.send({
         from: 'coordinator',
         to: intent.agent,
+        type: 'chat',
         topic: 'INTENT_NACK',
         text: `Intent ${payload.id} received NACK from ${payload.agent}`,
         att: {
@@ -532,6 +533,7 @@ export class Coordinator {
       this.bus.send({
         from: 'coordinator',
         to: intent.agent,
+        type: 'chat',
         topic: 'NEEDS_REBASE',
         text: `Intent ${intentId} needs rebase due to concurrent changes`,
         att: { intentId },
