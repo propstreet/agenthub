@@ -333,13 +333,13 @@ AgentHub supports field name variants for flexibility:
 
 | Canonical | Variants |
 |-----------|----------|
-| `agent` | `a`, `from`, `sender` |
-| `paths` | `p`, `path` |
+| `agent` | `from` |
+| `paths` | `p` |
 | `mode` | `m` |
 | `priority` | `prio` |
 | `ttlMs` | `ttl` |
-| `text` | `msg`, `message` |
-| `to` | `target`, `recipient` |
+| `text` | `msg` |
+| `to` | `target` |
 
 The `agent` field is **auto-populated** from your MCP session context when omitted.
 
@@ -447,31 +447,6 @@ AgentHub is designed to minimize token overhead:
 
 **Typical operation**: ≤60 tokens (payload only)
 
-## Roadmap
-
-### Current (v0.1.0)
-
-- ✅ Core MCP server with HTTP transport
-- ✅ Intent coordinator & conflict detection
-- ✅ Complete review lifecycle (request, claim, complete)
-- ✅ Filesystem watcher with rogue write detection
-- ✅ Message bus for agent communication
-- ✅ Azure OpenAI expert bridge
-- ✅ JSON persistence with atomic writes
-- ✅ Configurable logging (info/debug)
-- ✅ Terminal dashboard (Ink v5)
-- ✅ Self-documenting help system
-- ✅ Comprehensive schema validation
-
-### Future (v0.2.0+)
-
-- ⏳ SQLite audit log (optional persistence)
-- ⏳ Multi-workspace support
-- ⏳ Enhanced conflict resolution strategies
-- ⏳ Dashboard hotkeys (pause, escalate, nudge)
-- ⏳ Integration tests for multi-agent scenarios
-- ⏳ Performance benchmarks and optimization
-- ⏳ Web-based dashboard alternative
 
 ## Contributing
 

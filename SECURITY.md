@@ -19,7 +19,7 @@ We take the security of AgentHub seriously. If you discover a security vulnerabi
 
 Instead, please report security issues by:
 
-1. **Email**: Send details to [security@propstreet.com](mailto:security@propstreet.com)
+1. **Email**: Send details to [feedback@propstreet.com](mailto:feedback@propstreet.com)
 2. **GitHub Security Advisories**: Use the "Security" tab on our GitHub repository to report privately
 
 ### What to Include
@@ -181,7 +181,7 @@ Subscribe to security updates:
 ## Contact
 
 For security concerns, contact:
-- **Email**: security@propstreet.com
+- **Email**: feedback@propstreet.com
 - **GitHub**: Use Security tab for private vulnerability reports
 
 For general inquiries:

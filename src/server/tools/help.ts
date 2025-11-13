@@ -463,7 +463,7 @@ export async function handleHelp(): Promise<HubOpResponse> {
   return {
     ok: true,
     d: {
-      version: '0.1.0',
+      version: '1.0.0',
       operations,
       notes: [
         'Most operations auto-fill "agent" from your MCP session if omitted',
