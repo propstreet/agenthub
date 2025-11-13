@@ -51,7 +51,7 @@ export interface TTLInfo {
 export function calculateTTLRemaining(
   createdAt: number | undefined | null,
   ttlMs: number | undefined | null,
-  lastBeat?: number | undefined | null,
+  lastBeat?: number | null,
 ): TTLInfo {
   // Handle missing or invalid inputs
   if (
@@ -67,9 +67,8 @@ export function calculateTTLRemaining(
 
   const now = Date.now();
   // Use lastBeat if available (for heartbeat-refreshed TTLs)
-  const startTime = lastBeat !== undefined && lastBeat !== null && !isNaN(lastBeat)
-    ? lastBeat
-    : createdAt;
+  const startTime =
+    lastBeat !== undefined && lastBeat !== null && !isNaN(lastBeat) ? lastBeat : createdAt;
 
   const expiresAt = startTime + ttlMs;
   const remaining = Math.max(0, expiresAt - now);
@@ -104,9 +103,7 @@ export interface AgentStatusInfo {
   color: string;
 }
 
-export function getAgentStatus(
-  lastSeen: number | undefined | null,
-): AgentStatusInfo {
+export function getAgentStatus(lastSeen: number | undefined | null): AgentStatusInfo {
   if (lastSeen === undefined || lastSeen === null || isNaN(lastSeen)) {
     return { status: 'offline', icon: '✗', color: 'red' };
   }
@@ -155,7 +152,7 @@ export function formatDuration(ms: number | undefined | null): string {
 /**
  * Safely get timestamp from date-like value
  */
-export function getTimestamp(value: any): number | null {
+export function getTimestamp(value: unknown): number | null {
   if (value === undefined || value === null) {
     return null;
   }

@@ -2,15 +2,17 @@
  * State operation handler (s.get)
  */
 
-import type { StateGetPayload, HubOpResponse, StateSnapshot } from '../types/models.js';
+import type { HubOpResponse, StateSnapshot } from '../types/models.js';
 import type { StateCache } from '../core/state-cache.js';
+import { StateGetSchema } from '../schemas/state.js';
 
 export async function handleStateGet(
   state: StateCache,
   payload: unknown,
 ): Promise<HubOpResponse<StateSnapshot>> {
   try {
-    const data = payload as StateGetPayload;
+    // Use Zod schema for validation
+    const data = StateGetSchema.parse(payload);
     const snapshot = state.getSnapshot(data.since);
 
     return {

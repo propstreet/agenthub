@@ -18,6 +18,7 @@ describe('Coordinator - Glob Overlap Detection (P1 Fix)', () => {
     config = {
       port: 3333,
       host: 'localhost',
+      logLevel: 'info',
       limits: {
         maxIntents: 50,
         maxLeases: 50,

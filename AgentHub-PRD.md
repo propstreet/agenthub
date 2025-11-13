@@ -898,11 +898,453 @@ calculateTTLRemaining(createdAt: number, ttlMs: number): {
 
 ---
 
-## 24. Open Questions
+## 24. Critical Discovery Issues & Recommendations (2025-11-12)
+
+### 24.1 Agent Discovery Problems Identified
+
+**Critical Issue**: Agents struggle to effectively use AgentHub due to poor tool discovery and documentation.
+
+**Problems Found During Implementation**:
+1. **Tool Description Too Terse** (~100 chars)
+   - Current: "Multi-agent coordination. Ops: a.register (agent), i.open|i.vote..."
+   - No explanation of what each operation actually does
+   - No examples provided
+   - Field descriptions missing or cryptic (e.g., "mode(R|W|B|T)")
+
+2. **Poor MCP Integration**
+   - Tool appears as `mcp__agenthub__hub_op` (non-intuitive)
+   - Single mega-tool pattern obscures individual capabilities
+   - No way to query available operations programmatically
+
+3. **Missing Documentation**
+   - No explanation of mode values: R=Read, W=Write, B=Build, T=Test
+   - No explanation of priority levels: l=low, n=normal, h=high, r=review
+   - Session context behavior undocumented
+   - Error codes and recovery strategies missing
+
+4. **Insufficient Error Messages**
+   - Generic "Invalid payload" instead of field-specific guidance
+   - No examples of correct format in error responses
+   - No hints for common mistakes
+
+### 24.2 Recommended Improvements
+
+#### Immediate Fixes (Phase 2.1)
+
+**Enhanced Tool Description** (500+ chars):
+```
+AgentHub coordinates multiple AI agents working on shared codebases.
+
+OPERATIONS:
+• a.register - Register agent with roles (required first)
+• i.open/close - Declare intent to edit files (soft locks)
+• m.send/pull - Message other agents
+• review.request - Request code review
+• s.get - Get current state
+
+EXAMPLES:
+Register: {"op":"a.register","d":{"role":["developer"]}}
+Message: {"op":"m.send","d":{"text":"Hello","topic":"general"}}
+Intent: {"op":"i.open","d":{"paths":["src/**"],"mode":"W"}}
+
+Auto-populates agent from session. Accepts field variants.
+```
+
+**Add Help Operations**:
+```typescript
+case 'help.ops':
+  return {
+    ok: true,
+    d: {
+      'a.register': 'Register agent with roles. Auto-generates name if not provided.',
+      'i.open': 'Declare intent to edit files. Returns conflicts if any.',
+      'i.vote': 'Vote on another agent\'s intent (ack/nack).',
+      // ... etc
+    },
+    t: Date.now()
+  };
+
+case 'help.fields':
+  return {
+    ok: true,
+    d: {
+      mode: {
+        R: 'Read - viewing files only',
+        W: 'Write - editing files',
+        B: 'Build - compiling project',
+        T: 'Test - running tests'
+      },
+      priority: {
+        l: 'Low - can be preempted',
+        n: 'Normal - standard priority',
+        h: 'High - important task',
+        r: 'Review - code review priority'
+      },
+      // ... etc
+    },
+    t: Date.now()
+  };
+```
+
+#### Medium-term Improvements (Phase 2.2)
+
+1. **Operation-Specific Schemas**:
+   - Replace generic `z.record(z.unknown())` with specific schemas
+   - Enable better validation and error messages
+   - Auto-generate documentation from schemas
+
+2. **Better Error Messages**:
+   ```typescript
+   // Instead of: "Invalid payload"
+   // Return: "Missing required field 'paths'. Example: {\"paths\":[\"src/**\"]}"
+   ```
+
+3. **Discovery Resource**:
+   - Add `capabilities://` resource listing all operations
+   - Include version info and compatibility
+   - Provide operation metadata (requires registration, etc.)
+
+### 24.3 Implementation Plan
+
+**Week 3 (Discovery Improvements)**:
+- Day 1-2: Expand tool description and add help operations
+- Day 3-4: Implement operation-specific schemas
+- Day 5: Improve error messages with examples
+- Day 6-7: Add capabilities resource and testing
+
+**Success Metrics**:
+- New agents can start using hub within 5 minutes
+- Error messages lead to successful retry >80% of time
+- No "Invalid payload" errors without specific guidance
+
+### 24.4 Testing Feedback from Implementation
+
+**What Worked Well**:
+- Agent-friendly API with auto-population from session
+- Field name variants (agent/from, msg/text)
+- Default values for optional fields
+
+**What Failed**:
+- Initial attempts failed due to unclear payload structure
+- Had to read source code to understand operations
+- Trial and error needed to discover field names
+- No way to know what modes/priorities meant
+
+**Agent Experience Timeline**:
+- 0-5 min: Confusion about tool name and operations
+- 5-15 min: Trial and error with payloads
+- 15-30 min: Reading source code to understand
+- 30+ min: Finally productive after understanding
+
+With improvements, this should be:
+- 0-2 min: Read help, understand operations
+- 2-5 min: Successfully register and start working
+- 5+ min: Fully productive
+
+### 24.5 Critical Gaps Found by Reviewer Agent (2025-11-12)
+
+**Deep Review Findings from MysteriousHedgehog361**:
+
+1. **Review System Incomplete**:
+   - **Missing Operations**: Only `review.request` implemented, no way to claim or complete reviews
+   - **Result**: Review jobs (e.g., AxKPpJ16LLIX) stay pending indefinitely
+   - **Required**: Add `review.claim`, `review.complete` with findings payload
+
+2. **Documentation Drift**:
+   - README.md still references old `g.review` opcode (lines 223-235)
+   - No documentation of new auto-population features from base-handler.ts
+   - Field variants (agent/from, msg/text) undocumented
+
+3. **Schema Still Generic**:
+   - `d: z.record(z.unknown())` prevents validation
+   - MCP clients cannot auto-document payloads
+   - No field-specific error messages possible
+
+4. **Error Messages Remain Vague**:
+   - Missing fields result in "Unknown error" not specific guidance
+   - Example: handleIntentOpen fails silently if paths/mode missing
+   - No hints about correct format or required fields
+
+5. **No Discoverability Aids**:
+   - No help.* operations implemented
+   - No capabilities resource
+   - Tool name still shows as `mcp__agenthub__hub_op`
+
+### 24.6 Priority Action Items
+
+**CRITICAL (Blocking Reviews)**:
+1. Implement review lifecycle operations:
+   ```typescript
+   case 'review.claim':
+     // Mark job as claimed by agent
+   case 'review.complete':
+     // Submit findings and close job
+   ```
+
+**HIGH (Agent Experience)**:
+2. Add help operations as specified in 24.2
+3. Update README.md with correct opcodes and features
+4. Implement field-specific error messages
+
+**MEDIUM (Long-term Maintainability)**:
+5. Split monolithic schema into operation-specific schemas
+6. Consider splitting hub_op into multiple domain-specific tools
+7. Add capabilities resource for programmatic discovery
+
+## 25. Phase 2 Implementation Plan: Agent Efficiency (2025-11-12)
+
+### 25.1 Objective
+Transform AgentHub from a functional but opaque system into a self-documenting, discoverable platform that agents can use efficiently within 5 minutes.
+
+### 25.2 Implementation Phases
+
+#### Phase 2.1: Critical Fixes (Days 1-3)
+**Goal**: Unblock basic functionality and reviews
+
+**Day 1: Review System Completion**
+```typescript
+// src/server/tools/review.ts - Add missing operations
+export async function handleReviewClaim(
+  state: StateCache,
+  payload: { jobId: string }
+): Promise<HubOpResponse> {
+  // Validate agent has reviewer role
+  // Mark job as claimed
+  // Return job details
+}
+
+export async function handleReviewComplete(
+  state: StateCache,
+  payload: {
+    jobId: string;
+    findings: {
+      severity: 'info' | 'warning' | 'critical';
+      items: Array<{file: string; line?: number; message: string}>;
+      summary: string;
+    };
+  }
+): Promise<HubOpResponse> {
+  // Validate ownership
+  // Store findings
+  // Mark complete
+  // Notify originator
+}
+```
+
+**Day 2: Help Operations**
+```typescript
+// src/server/tools/help.ts - New file
+export const OPERATION_DOCS = {
+  'a.register': {
+    description: 'Register agent with roles. Auto-generates name if not provided.',
+    required: ['role'],
+    optional: ['agent', 'version'],
+    example: { role: ['developer', 'reviewer'] }
+  },
+  'i.open': {
+    description: 'Declare intent to edit files. Returns conflicts if any.',
+    required: ['paths', 'mode'],
+    optional: ['priority', 'ttlMs', 'hunks'],
+    example: { paths: ['src/**/*.ts'], mode: 'W', priority: 'n' }
+  },
+  // ... all operations
+};
+
+export const FIELD_DOCS = {
+  mode: {
+    type: 'enum',
+    values: {
+      R: 'Read - viewing files only',
+      W: 'Write - editing files',
+      B: 'Build - compiling project',
+      T: 'Test - running tests'
+    }
+  },
+  priority: {
+    type: 'enum',
+    values: {
+      l: 'Low - can be preempted',
+      n: 'Normal - standard priority',
+      h: 'High - important task',
+      r: 'Review - code review priority'
+    }
+  },
+  // ... all fields
+};
+```
+
+**Day 3: Enhanced Tool Description**
+```typescript
+// src/server/server.ts - Update tool registration
+const TOOL_DESCRIPTION = `
+AgentHub: Coordinate multiple AI agents on shared codebases.
+
+QUICK START:
+1. Register: {"op":"a.register","d":{"role":["developer"]}}
+2. Message: {"op":"m.send","d":{"text":"Hello"}}
+3. Get help: {"op":"help.ops","d":{}}
+
+CATEGORIES:
+• Agent: a.register
+• Intents: i.open, i.vote, i.renew, i.close
+• Messages: m.send, m.pull
+• Review: review.request, review.claim, review.complete
+• Expert: expert.ask
+• State: s.get
+• Help: help.ops, help.fields, help.examples
+
+Auto-populates agent from session. Accepts field variants (agent/from, msg/text).
+Version: 0.2.0
+`;
+```
+
+#### Phase 2.2: Discoverability (Days 4-6)
+**Goal**: Make system self-documenting
+
+**Day 4: Operation-Specific Schemas**
+```typescript
+// src/server/schemas/operations.ts
+export const IntentOpenSchema = z.object({
+  agent: z.string().optional(), // Auto-populated
+  paths: z.array(z.string()).min(1),
+  mode: z.enum(['R', 'W', 'B', 'T']),
+  priority: z.enum(['l', 'n', 'h', 'r']).default('n'),
+  ttlMs: z.number().positive().default(60000),
+  hunks: z.array(z.any()).optional()
+});
+
+// Validate with helpful errors
+const result = IntentOpenSchema.safeParse(payload);
+if (!result.success) {
+  const issues = result.error.issues.map(i =>
+    `${i.path.join('.')}: ${i.message}`
+  );
+  return {
+    ok: false,
+    error: `Invalid payload:\n${issues.join('\n')}\nExample: ${JSON.stringify(OPERATION_DOCS['i.open'].example)}`,
+    t: Date.now()
+  };
+}
+```
+
+**Day 5: Capabilities Resource**
+```typescript
+// src/server/resources/capabilities.ts
+export function handleCapabilitiesResource(): string {
+  return JSON.stringify({
+    version: '0.2.0',
+    operations: Object.keys(OPERATION_DOCS),
+    features: [
+      'auto-population',
+      'field-variants',
+      'session-context',
+      'soft-locking',
+      'review-system'
+    ],
+    limits: {
+      maxIntents: 50,
+      maxMessageLength: 10000,
+      ttlMax: 3600000
+    },
+    discovery: {
+      help: ['help.ops', 'help.fields', 'help.examples'],
+      resources: ['inbox://{agent}', 'state://live', 'capabilities://']
+    }
+  }, null, 2);
+}
+```
+
+**Day 6: README and Documentation Update**
+- Fix all stale opcodes (g.review → review.request)
+- Document auto-population feature
+- Add field variant table
+- Include quick start guide
+- Add troubleshooting section
+
+#### Phase 2.3: Testing & Refinement (Days 7-8)
+**Goal**: Validate improvements with new agents
+
+**Success Metrics**:
+1. ✅ New agent productive in <5 minutes
+2. ✅ No source code reading required
+3. ✅ Error messages lead to successful retry >80%
+4. ✅ Review lifecycle completes end-to-end
+5. ✅ Help operations answer all common questions
+
+### 25.3 Expected Outcomes
+
+**Before (Current State)**:
+- 30+ minutes to understand system
+- Must read source code
+- Reviews stuck pending
+- Generic error messages
+- No discovery mechanism
+
+**After (Target State)**:
+- 5 minutes to full productivity
+- Self-documenting via help ops
+- Complete review lifecycle
+- Actionable error messages
+- Full discovery support
+
+### 25.4 Migration Path
+
+1. **Backward Compatibility**: All existing operations continue working
+2. **Gradual Adoption**: New features (help, review.claim) are additive
+3. **Field Variants**: Both old (p, m, t) and new (paths, mode, ttlMs) work
+4. **Documentation**: Clear migration guide for existing agents
+
+### 25.5 Critical Violations Found (2025-11-12)
+
+**PRD Contract Violations**:
+
+1. **Review Lifecycle Incomplete (Blocks Acceptance Test #3)**:
+   - PRD §12 & §16 require "claim and post findings"
+   - Only `review.request` implemented (no claim/complete)
+   - Review jobs stuck pending forever (e.g., AxKPpJ16LLIX)
+   - Dashboard shows inaccurate state
+
+2. **TTL Defaults Contradiction**:
+   - `base-handler.ts`: 60,000ms (1 minute) hardcoded
+   - `DEFAULT_CONFIG`: 120,000ms (2 minutes) documented
+   - **50% reduction in expected TTL** - breaking change
+   - Violates PRD heartbeat window expectations
+
+3. **Documentation-Code Divergence**:
+   - README: `g.review` (old, broken)
+   - Implementation: `review.request` (new, works)
+   - Agents following README get "Unknown operation"
+   - Violates "self-documenting" principle
+
+4. **No Payload Validation**:
+   - Missing fields → "Unknown error" not specific guidance
+   - `handleIntentOpen` forwards unvalidated data
+   - Crashes in downstream (Coordinator/micromatch)
+   - Violates PRD §11 "self-documenting field names"
+
+5. **MCP Discovery Opaque**:
+   - Generic schema: `d: z.record(z.unknown())`
+   - No operation enumeration
+   - No field semantics
+   - No examples available
+   - Violates "role-agnostic" and "soft coordination" goals
+
+### 25.6 Long-term Vision
+
+**Phase 3 (Future)**:
+- Split hub_op into domain-specific tools
+- GraphQL-style introspection
+- Plugin system for custom operations
+- Persistent operation history
+- Web dashboard for operation design
+
+## 26. Open Questions
 
 - Should we add **AST‑hunk** intent granularity in v1, or start with path‑based only?
 - Do we need **owner tables** (path→role) to auto‑prioritize ACK/NACK in hot folders?
 - Would a small persistent log (SQLite) add enough value for audits to justify footprint?
 - Should dashboard refresh rate be configurable (currently 500ms)?
 - Should agent status thresholds be configurable per deployment?
+- Should we split hub_op into multiple tools for better discoverability?
+- Should help operations be a separate tool or part of hub_op?
 

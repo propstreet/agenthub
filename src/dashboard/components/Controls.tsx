@@ -4,13 +4,16 @@
 
 import { Box, Text } from 'ink';
 
-export function Controls() {
+export interface ControlsProps {
+  paused: boolean;
+}
+
+export function Controls({ paused }: ControlsProps) {
   return (
     <Box borderStyle="single" borderColor="gray" padding={1} marginTop={1}>
-      <Text dimColor>[R]efresh </Text>
+      {paused && <Text dimColor>[R]efresh </Text>}
       <Text dimColor>[P]ause </Text>
-      <Text dimColor>[E]scalate </Text>
-      <Text dimColor>[N]udge </Text>
+      <Text dimColor>[B]roadcast </Text>
       <Text dimColor>[Q]uit</Text>
     </Box>
   );

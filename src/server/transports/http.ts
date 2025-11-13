@@ -9,16 +9,20 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { StateCache } from '../core/state-cache.js';
+import type { MessageBus } from '../core/bus.js';
 import { handleStateResource } from '../resources/state.js';
 import { runWithSession } from '../session-context.js';
 
 export function createHttpTransport(
   mcpServer: McpServer,
+  bus: MessageBus,
   state: StateCache,
   port: number,
   host: string,
+  logLevel: 'info' | 'debug' = 'info',
 ): Express {
   const app = express();
+  const isDebug = logLevel === 'debug';
 
   // Per-request transports - SDK expects one transport per HTTP request-response cycle
   // This avoids "No connection established" errors when clients close connections early
@@ -29,44 +33,40 @@ export function createHttpTransport(
   // Middleware
   app.use(express.json());
 
-  // Response tracking middleware
-  app.use((req, res, next) => {
-    const originalSend = res.send;
-    const originalJson = res.json;
-    const requestUuid = Math.random().toString(36).substring(2, 9);
+  // Response tracking middleware (debug only)
+  if (isDebug) {
+    app.use((req, res, next) => {
+      const originalSend = res.send;
+      const originalJson = res.json;
+      const requestUuid = Math.random().toString(36).substring(2, 9);
 
-    // Track when send() is called
-    res.send = function (body) {
-      console.log(
-        `[HTTP:${requestUuid}] 🚀 res.send() called for ${req.method} ${req.path}`,
-      );
-      return originalSend.call(this, body);
-    };
+      // Track when send() is called
+      res.send = function (body) {
+        console.log(`[HTTP:${requestUuid}] 🚀 res.send() called for ${req.method} ${req.path}`);
+        return originalSend.call(this, body);
+      };
 
-    // Track when json() is called
-    res.json = function (body) {
-      console.log(
-        `[HTTP:${requestUuid}] 🚀 res.json() called for ${req.method} ${req.path}`,
-      );
-      return originalJson.call(this, body);
-    };
+      // Track when json() is called
+      res.json = function (body) {
+        console.log(`[HTTP:${requestUuid}] 🚀 res.json() called for ${req.method} ${req.path}`);
+        return originalJson.call(this, body);
+      };
 
-    // Track when response finishes
-    res.on('finish', () => {
-      console.log(
-        `[HTTP:${requestUuid}] ✓ Response finished for ${req.method} ${req.path}, status=${res.statusCode}`,
-      );
+      // Track when response finishes
+      res.on('finish', () => {
+        console.log(
+          `[HTTP:${requestUuid}] ✓ Response finished for ${req.method} ${req.path}, status=${res.statusCode}`,
+        );
+      });
+
+      // Track when response closes
+      res.on('close', () => {
+        console.log(`[HTTP:${requestUuid}] 🔌 Response closed for ${req.method} ${req.path}`);
+      });
+
+      next();
     });
-
-    // Track when response closes
-    res.on('close', () => {
-      console.log(
-        `[HTTP:${requestUuid}] 🔌 Response closed for ${req.method} ${req.path}`,
-      );
-    });
-
-    next();
-  });
+  }
 
   // CORS for localhost only (security)
   app.use((req, res, next) => {
@@ -87,79 +87,105 @@ export function createHttpTransport(
     try {
       // Get MCP session ID from header (lowercase with hyphens per spec)
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
-      const method = req.body?.method;
-      const requestId = req.body?.id;
 
-      // Log Accept header to check for SSE support issues
-      const acceptHeader = req.headers['accept'] as string | undefined;
-      console.log(
-        `[HTTP:${requestUuid}] 📥 POST received: method=${method}, sessionId=${sessionId?.substring(0, 8)}..., requestId=${requestId}, accept=${acceptHeader}, t=0ms`,
-      );
+      // Safely extract method and requestId from body
+      let methodValue: unknown;
+      let requestIdValue: unknown;
+      if (typeof req.body === 'object' && req.body !== null) {
+        const body = req.body as Record<string, unknown>;
+        methodValue = body['method'];
+        requestIdValue = body['id'];
+      }
 
-      // Create a new transport for EVERY request (SDK expectation)
-      // This prevents "No connection established" errors when clients close connections early
-      console.log(
-        `[HTTP:${requestUuid}] 🆕 Creating per-request transport for method=${method}`,
-      );
+      // Log Accept header to check for SSE support issues (debug only)
+      if (isDebug) {
+        const acceptHeader = req.headers.accept;
+        const sessionIdDisplay = sessionId !== undefined ? sessionId.substring(0, 8) : 'none';
+        const methodDisplay = typeof methodValue === 'string' ? methodValue : 'unknown';
+        const requestIdDisplay = typeof requestIdValue === 'string' ? requestIdValue : 'unknown';
+        console.log(
+          `[HTTP:${requestUuid}] 📥 POST received: method=${methodDisplay}, sessionId=${sessionIdDisplay}..., requestId=${requestIdDisplay}, accept=${acceptHeader ?? 'none'}, t=0ms`,
+        );
+
+        // Create a new transport for EVERY request (SDK expectation)
+        // This prevents "No connection established" errors when clients close connections early
+        console.log(
+          `[HTTP:${requestUuid}] 🆕 Creating per-request transport for method=${methodDisplay}`,
+        );
+      }
 
       const transport = new StreamableHTTPServerTransport({
         // For non-initialize requests, we don't generate a new session ID
         sessionIdGenerator: isInitializeRequest(req.body) ? () => randomUUID() : undefined,
         enableJsonResponse: true,
         onsessioninitialized: (id) => {
-          console.log(`[HTTP:${requestUuid}] ✅ Session initialized: ${id.substring(0, 8)}...`);
+          if (isDebug) {
+            console.log(`[HTTP:${requestUuid}] ✅ Session initialized: ${id.substring(0, 8)}...`);
+          }
           // Clean up session in state cache when session ends
           transport.onclose = () => {
             state.cleanupSession(id);
-            console.log(`[HTTP:${requestUuid}] Session ${id.substring(0, 8)}... cleaned up`);
+            if (isDebug) {
+              console.log(`[HTTP:${requestUuid}] Session ${id.substring(0, 8)}... cleaned up`);
+            }
           };
         },
         onsessionclosed: (id) => {
           state.cleanupSession(id);
-          console.log(`[HTTP:${requestUuid}] Session closed: ${id.substring(0, 8)}...`);
+          if (isDebug) {
+            console.log(`[HTTP:${requestUuid}] Session closed: ${id.substring(0, 8)}...`);
+          }
         },
       });
 
       // Connect MCP server to this transport for EVERY request
       await mcpServer.connect(transport);
 
-      // Run request in session context (use MCP session ID)
-      const mcpSessionId = transport.sessionId ?? sessionId ?? 'unknown';
-      console.log(
-        `[HTTP:${requestUuid}] 🔄 Before transport.handleRequest, t=${Date.now() - requestStartTime}ms`,
-      );
-
-      await runWithSession(mcpSessionId, async () => {
-        const handleStartTime = Date.now();
-        console.log(
-          `[HTTP:${requestUuid}] ⚙️  Inside runWithSession, calling handleRequest...`,
-        );
-
-        await transport.handleRequest(req, res, req.body);
-
-        const handleDuration = Date.now() - handleStartTime;
-        console.log(
-          `[HTTP:${requestUuid}] ✅ handleRequest returned after ${handleDuration}ms`,
-        );
+      // Clean up transport when response closes (recommended by SDK)
+      res.on('close', () => {
+        void transport.close();
       });
 
-      const totalTime = Date.now() - requestStartTime;
-      console.log(`[HTTP:${requestUuid}] 📤 POST completed, total=${totalTime}ms`);
+      // Run request in session context (use MCP session ID)
+      // Use random UUID fallback to avoid cross-talk between anonymous clients
+      const mcpSessionId = transport.sessionId ?? sessionId ?? randomUUID();
 
-      // Check if response was sent
-      if (!res.headersSent) {
-        console.warn(
-          `[HTTP:${requestUuid}] ⚠️  WARNING: Response headers NOT sent after ${totalTime}ms! Response may be hanging.`,
+      if (isDebug) {
+        console.log(
+          `[HTTP:${requestUuid}] 🔄 Before transport.handleRequest, t=${Date.now() - requestStartTime}ms`,
         );
-      } else {
-        console.log(`[HTTP:${requestUuid}] ✓ Response headers were sent`);
+      }
+
+      await runWithSession(mcpSessionId, async () => {
+        if (isDebug) {
+          const handleStartTime = Date.now();
+          console.log(`[HTTP:${requestUuid}] ⚙️  Inside runWithSession, calling handleRequest...`);
+
+          await transport.handleRequest(req, res, req.body);
+
+          const handleDuration = Date.now() - handleStartTime;
+          console.log(`[HTTP:${requestUuid}] ✅ handleRequest returned after ${handleDuration}ms`);
+        } else {
+          await transport.handleRequest(req, res, req.body);
+        }
+      });
+
+      if (isDebug) {
+        const totalTime = Date.now() - requestStartTime;
+        console.log(`[HTTP:${requestUuid}] 📤 POST completed, total=${totalTime}ms`);
+
+        // Check if response was sent
+        if (!res.headersSent) {
+          console.warn(
+            `[HTTP:${requestUuid}] ⚠️  WARNING: Response headers NOT sent after ${totalTime}ms! Response may be hanging.`,
+          );
+        } else {
+          console.log(`[HTTP:${requestUuid}] ✓ Response headers were sent`);
+        }
       }
     } catch (error) {
       const totalTime = Date.now() - requestStartTime;
-      console.error(
-        `[HTTP:${requestUuid}] ❌ POST error after ${totalTime}ms:`,
-        error,
-      );
+      console.error(`[HTTP:${requestUuid}] ❌ POST error after ${totalTime}ms:`, error);
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Internal server error',
@@ -175,20 +201,27 @@ export function createHttpTransport(
 
     try {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
-      const acceptHeader = req.headers['accept'] as string | undefined;
 
-      console.log(
-        `[HTTP:${requestUuid}] 📥 GET received: sessionId=${sessionId?.substring(0, 8)}..., accept=${acceptHeader}`,
-      );
+      if (isDebug) {
+        const acceptHeader = req.headers.accept;
+        const sessionIdDisplay = sessionId !== undefined ? sessionId.substring(0, 8) : 'none';
+        console.log(
+          `[HTTP:${requestUuid}] 📥 GET received: sessionId=${sessionIdDisplay}..., accept=${acceptHeader ?? 'none'}`,
+        );
+      }
 
-      if (!sessionId) {
-        console.warn(`[HTTP:${requestUuid}] ❌ Missing session ID for GET request`);
+      if (sessionId === undefined) {
+        if (isDebug) {
+          console.warn(`[HTTP:${requestUuid}] ❌ Missing session ID for GET request`);
+        }
         res.status(400).send('Invalid or missing MCP session ID');
         return;
       }
 
       // Create per-request transport for SSE streaming
-      console.log(`[HTTP:${requestUuid}] 🆕 Creating per-request transport for GET/SSE`);
+      if (isDebug) {
+        console.log(`[HTTP:${requestUuid}] 🆕 Creating per-request transport for GET/SSE`);
+      }
 
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // Don't generate new session for GET
@@ -196,6 +229,11 @@ export function createHttpTransport(
       });
 
       await mcpServer.connect(transport);
+
+      // Clean up transport when response closes (recommended by SDK)
+      res.on('close', () => {
+        void transport.close();
+      });
 
       await runWithSession(sessionId, async () => {
         await transport.handleRequest(req, res, undefined);
@@ -218,17 +256,22 @@ export function createHttpTransport(
     try {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
-      console.log(
-        `[HTTP:${requestUuid}] 📥 DELETE received: sessionId=${sessionId?.substring(0, 8)}...`,
-      );
+      if (isDebug) {
+        const sessionIdDisplay = sessionId !== undefined ? sessionId.substring(0, 8) : 'none';
+        console.log(`[HTTP:${requestUuid}] 📥 DELETE received: sessionId=${sessionIdDisplay}...`);
+      }
 
-      if (!sessionId) {
-        console.warn(`[HTTP:${requestUuid}] ❌ Missing session ID for DELETE request`);
+      if (sessionId === undefined) {
+        if (isDebug) {
+          console.warn(`[HTTP:${requestUuid}] ❌ Missing session ID for DELETE request`);
+        }
         res.status(400).send('Invalid or missing MCP session ID');
         return;
       }
 
-      console.log(`[HTTP:${requestUuid}] 🆕 Creating per-request transport for DELETE`);
+      if (isDebug) {
+        console.log(`[HTTP:${requestUuid}] 🆕 Creating per-request transport for DELETE`);
+      }
 
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // Don't generate new session for DELETE
@@ -237,13 +280,20 @@ export function createHttpTransport(
 
       await mcpServer.connect(transport);
 
+      // Clean up transport when response closes (recommended by SDK)
+      res.on('close', () => {
+        void transport.close();
+      });
+
       await runWithSession(sessionId, async () => {
         await transport.handleRequest(req, res, undefined);
       });
 
       // Session cleanup
       state.cleanupSession(sessionId);
-      console.log(`[HTTP:${requestUuid}] Session ${sessionId.substring(0, 8)}... cleaned up`);
+      if (isDebug) {
+        console.log(`[HTTP:${requestUuid}] Session ${sessionId.substring(0, 8)}... cleaned up`);
+      }
     } catch (error) {
       console.error(`[HTTP:${requestUuid}] ❌ DELETE request error:`, error);
       if (!res.headersSent) {
@@ -270,6 +320,42 @@ export function createHttpTransport(
       console.error('[HTTP] State resource error:', error);
       res.status(500).json({
         error: 'Failed to retrieve state',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  // Dashboard broadcast endpoint (non-MCP, supervision only)
+  app.post('/hub/broadcast', (req: Request, res: Response): void => {
+    try {
+      const body = req.body as { text?: unknown; topic?: unknown };
+      const { text } = body;
+      const topic = body.topic ?? 'supervision';
+
+      // Validate text is a non-empty string
+      if (typeof text !== 'string' || text.trim() === '') {
+        res.status(400).json({ error: 'text required' });
+        return;
+      }
+
+      // Validate topic is a string
+      if (typeof topic !== 'string') {
+        res.status(400).json({ error: 'topic must be a string' });
+        return;
+      }
+
+      // Send message through bus (broadcast to all agents)
+      const msg = bus.send({
+        from: 'dashboard',
+        // Omit 'to' field for broadcast (not set to undefined)
+        topic,
+        text,
+      });
+
+      res.json({ ok: true, messageId: msg.id });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Broadcast failed',
         message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
@@ -319,10 +405,7 @@ export function createHttpTransport(
 
       server.close((err) => {
         clearTimeout(timeout);
-        if (
-          err !== undefined &&
-          (err as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING'
-        ) {
+        if (err !== undefined && (err as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') {
           reject(err);
         } else {
           console.log('[HTTP] Server closed');

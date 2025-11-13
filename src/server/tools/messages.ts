@@ -2,10 +2,11 @@
  * Message operation handlers (m.send, m.pull)
  */
 
-import type { MessageSendPayload, MessagePullPayload, HubOpResponse } from '../types/models.js';
+import type { HubOpResponse } from '../types/models.js';
 import type { MessageBus } from '../core/bus.js';
 import type { StateCache } from '../core/state-cache.js';
 import { getCurrentSessionId } from '../session-context.js';
+import { MessageSendSchema, MessagePullSchema } from '../schemas/messages.js';
 
 export async function handleMessageSend(
   state: StateCache,
@@ -13,46 +14,38 @@ export async function handleMessageSend(
   payload: unknown,
 ): Promise<HubOpResponse> {
   try {
-    // Make the API more agent-friendly
-    const rawData = payload as any;
+    const normalized = MessageSendSchema.parse(payload);
 
-    // Support both 'agent' and 'from' fields for sender
-    const from = rawData.from || rawData.agent;
-
-    // If no sender specified, try to get from session
-    let sender = from;
+    let sender = normalized.from;
     const sessionId = getCurrentSessionId();
-    if (!sender && sessionId) {
-      // Try to find the agent registered to this session
+    if (sender === undefined && sessionId !== undefined) {
       const sessionAgent = state.getAgentBySession(sessionId);
-      if (sessionAgent) {
+      if (sessionAgent !== undefined) {
         sender = sessionAgent.name;
       }
     }
 
-    if (!sender) {
-      throw new Error('Sender agent required. Use "from" or "agent" field, or register an agent first.');
+    if (sender === undefined) {
+      throw new Error(
+        'Sender agent required. Use "from" or "agent" field, or register an agent first.',
+      );
     }
 
-    // Support both 'msg' and 'text' fields for message content
-    const text = rawData.text || rawData.msg;
-    if (!text) {
-      throw new Error('Message text required. Use "text" or "msg" field.');
-    }
-
-    // Make topic optional with a sensible default
-    const topic = rawData.topic || 'general';
-
-    // Construct the normalized payload
-    const data: MessageSendPayload = {
+    // Construct resolved payload with required fields
+    const data: {
+      from: string;
+      to?: string;
+      topic: string;
+      text: string;
+      att?: Record<string, unknown>;
+    } = {
       from: sender,
-      to: rawData.to,
-      topic,
-      text,
-      att: rawData.att,
+      topic: normalized.topic,
+      text: normalized.text,
+      ...(normalized.to !== undefined && { to: normalized.to }),
+      ...(normalized.att !== undefined && { att: normalized.att }),
     };
 
-    // Validate agent ownership
     if (sessionId !== undefined) {
       state.validateAgentOwnership(data.from, sessionId);
     }
@@ -82,12 +75,14 @@ export async function handleMessagePull(
   console.log(`[m.pull] Starting at ${startTime}`);
 
   try {
-    const data = payload as MessagePullPayload;
-    console.log(`[m.pull] Payload parsed: agent=${data.agent}, since=${data.since}`);
+    const data = MessagePullSchema.parse(payload);
+    console.log(`[m.pull] Payload parsed: agent=${data.agent}, since=${data.since ?? 'undefined'}`);
 
     // Validate agent ownership (agent field is the recipient)
     const sessionId = getCurrentSessionId();
-    console.log(`[m.pull] Session ID: ${sessionId?.substring(0, 8)}...`);
+    console.log(
+      `[m.pull] Session ID: ${sessionId !== undefined ? sessionId.substring(0, 8) : 'none'}...`,
+    );
 
     if (sessionId !== undefined) {
       const validateStart = Date.now();
@@ -97,7 +92,9 @@ export async function handleMessagePull(
 
     const pullStart = Date.now();
     const messages = bus.pull(data);
-    console.log(`[m.pull] Pull took ${Date.now() - pullStart}ms, found ${messages.length} messages`);
+    console.log(
+      `[m.pull] Pull took ${Date.now() - pullStart}ms, found ${messages.length} messages`,
+    );
 
     const totalTime = Date.now() - startTime;
     console.log(`[m.pull] Total time: ${totalTime}ms`);
@@ -109,7 +106,8 @@ export async function handleMessagePull(
     };
   } catch (error) {
     const totalTime = Date.now() - startTime;
-    console.log(`[m.pull] Error after ${totalTime}ms: ${error}`);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.log(`[m.pull] Error after ${totalTime}ms: ${errorMessage}`);
 
     return {
       ok: false,

@@ -39,20 +39,12 @@ export function IntentPanel({ intents }: IntentPanelProps) {
 
   const getTTLRemaining = (intent: Intent): string => {
     // Use the robust time calculation utility
-    const ttlInfo = calculateTTLRemaining(
-      intent.createdAt,
-      intent.ttlMs,
-      intent.lastBeat
-    );
+    const ttlInfo = calculateTTLRemaining(intent.createdAt, intent.ttlMs, intent.lastBeat);
     return ttlInfo.display;
   };
 
   const getTTLColor = (intent: Intent): string => {
-    const ttlInfo = calculateTTLRemaining(
-      intent.createdAt,
-      intent.ttlMs,
-      intent.lastBeat
-    );
+    const ttlInfo = calculateTTLRemaining(intent.createdAt, intent.ttlMs, intent.lastBeat);
     return ttlInfo.expired ? 'red' : hasConflicts(intent) ? 'yellow' : 'green';
   };
 
@@ -88,9 +80,7 @@ export function IntentPanel({ intents }: IntentPanelProps) {
               </Text>
               <Text> </Text>
               <Text dimColor>{truncate(intent.paths[0] ?? '(no paths)', 20)} </Text>
-              <Text color={getTTLColor(intent)}>
-                TTL: {getTTLRemaining(intent).padEnd(5)}
-              </Text>
+              <Text color={getTTLColor(intent)}>TTL: {getTTLRemaining(intent).padEnd(5)}</Text>
               {hasConflicts(intent) && <Text color="red"> ⚠️{intent.conflicts?.length}</Text>}
             </Box>
           ))}

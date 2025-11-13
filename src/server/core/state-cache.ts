@@ -104,7 +104,8 @@ export class StateCache {
     this.agents.set(name, agent);
 
     if (existing === undefined) {
-      const sessionNote = sessionId !== undefined ? ` (session: ${sessionId.substring(0, 8)}...)` : '';
+      const sessionNote =
+        sessionId !== undefined ? ` (session: ${sessionId.substring(0, 8)}...)` : '';
       console.log(`[StateCache] Agent registered: ${name} [${role.join(', ')}]${sessionNote}`);
     }
 
@@ -170,7 +171,7 @@ export class StateCache {
    */
   getAgentBySession(sessionId: string): Agent | undefined {
     const agentName = this.sessionToAgent.get(sessionId);
-    if (agentName) {
+    if (agentName !== undefined) {
       return this.agents.get(agentName);
     }
     return undefined;
@@ -200,7 +201,9 @@ export class StateCache {
   cleanupSession(sessionId: string): void {
     const agentName = this.sessionToAgent.get(sessionId);
     if (agentName !== undefined) {
-      console.log(`[StateCache] Cleaning up session ${sessionId.substring(0, 8)}... (agent: ${agentName})`);
+      console.log(
+        `[StateCache] Cleaning up session ${sessionId.substring(0, 8)}... (agent: ${agentName})`,
+      );
 
       this.agents.delete(agentName);
       this.sessionToAgent.delete(sessionId);
@@ -363,6 +366,42 @@ export class StateCache {
    */
   getAllReviewJobs(): ReviewJob[] {
     return Array.from(this.reviewJobs.values());
+  }
+
+  /**
+   * Get review jobs claimed by a specific agent
+   */
+  getClaimedReviewJobs(agent: string): ReviewJob[] {
+    return Array.from(this.reviewJobs.values()).filter(
+      (j) => j.status === 'claimed' && j.claimedBy === agent,
+    );
+  }
+
+  /**
+   * Get completed review jobs since timestamp
+   */
+  getCompletedReviewJobs(since?: number): ReviewJob[] {
+    const jobs = Array.from(this.reviewJobs.values()).filter((j) => j.status === 'completed');
+    if (since !== undefined) {
+      return jobs.filter((j) => j.createdAt >= since);
+    }
+    return jobs;
+  }
+
+  /**
+   * Validate review job ownership
+   * @throws Error if job doesn't exist or agent doesn't own it
+   */
+  validateReviewOwnership(jobId: string, agent: string): void {
+    const job = this.reviewJobs.get(jobId);
+    if (job === undefined) {
+      throw new Error(`Review job ${jobId} not found`);
+    }
+    if (job.claimedBy !== agent) {
+      throw new Error(
+        `Review job ${jobId} is not claimed by ${agent} (claimed by: ${job.claimedBy ?? 'none'})`,
+      );
+    }
   }
 
   // =========================================================================
@@ -579,6 +618,64 @@ export class StateCache {
     this.leases.clear();
     this.reviewJobs.clear();
     this.semaphores.clear();
+  }
+
+  /**
+   * Restore state from snapshot (for persistence)
+   * Filters out expired intents/leases and clears ephemeral session bindings
+   */
+  restore(snapshot: StateSnapshot): void {
+    const now = Date.now();
+
+    // Clear existing state
+    this.clear();
+
+    // Restore agents
+    snapshot.agents.forEach((agent) => {
+      this.agents.set(agent.name, agent);
+    });
+
+    // Restore intents (filter expired)
+    const validIntents = snapshot.intents.filter((intent) => {
+      // Skip expired intents (check createdAt + ttlMs)
+      if (intent.createdAt + intent.ttlMs < now) {
+        return false;
+      }
+      // Skip already ended intents
+      if (intent.status === 'ended') {
+        return false;
+      }
+      return true;
+    });
+    validIntents.forEach((intent) => {
+      this.intents.set(intent.id, intent);
+    });
+
+    // Restore leases (filter expired)
+    const validLeases = snapshot.leases.filter((lease) => lease.exp > now);
+    validLeases.forEach((lease) => {
+      this.leases.set(lease.id, lease);
+    });
+
+    // Restore review jobs
+    snapshot.reviewJobs.forEach((job) => {
+      this.reviewJobs.set(job.id, job);
+    });
+
+    // Restore semaphores if present
+    if (snapshot.semaphores !== undefined) {
+      Object.entries(snapshot.semaphores).forEach(([key, value]) => {
+        this.semaphores.set(key, value);
+      });
+    }
+
+    // Clear ephemeral session bindings (sessions don't persist across restarts)
+    this.sessionToAgent.clear();
+    this.agentToSession.clear();
+
+    console.log(
+      `[StateCache] Restored from snapshot: ${this.agents.size} agents, ${this.intents.size}/${snapshot.intents.length} intents (${snapshot.intents.length - this.intents.size} expired), ${this.leases.size}/${snapshot.leases.length} leases (${snapshot.leases.length - this.leases.size} expired), ${this.reviewJobs.size} reviews`,
+    );
   }
 
   /**

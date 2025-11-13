@@ -5,6 +5,7 @@
  */
 
 import { render, Box, Text } from 'ink';
+import { useState } from 'react';
 import Spinner from 'ink-spinner';
 import { Dashboard } from './Dashboard.js';
 import { useHubState } from './hooks/useHubState.js';
@@ -13,7 +14,8 @@ const HUB_URL = process.env['AGENTHUB_URL'] ?? 'http://localhost:3333';
 const POLL_INTERVAL = 500; // 500ms
 
 function App() {
-  const { state, error, isLoading } = useHubState(HUB_URL, POLL_INTERVAL);
+  const [paused, setPaused] = useState(false);
+  const { state, error, isLoading, refresh } = useHubState(HUB_URL, POLL_INTERVAL, paused);
 
   // Error state
   if (error !== null) {
@@ -48,7 +50,17 @@ function App() {
   }
 
   // Main dashboard
-  return <Dashboard state={state} />;
+  return (
+    <Dashboard
+      state={state}
+      paused={paused}
+      onTogglePause={() => {
+        setPaused(!paused);
+        return undefined;
+      }}
+      onRefresh={refresh}
+    />
+  );
 }
 
 // Render the app

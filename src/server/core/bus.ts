@@ -4,13 +4,8 @@
  */
 
 import { nanoid } from 'nanoid';
-import type {
-  Msg,
-  Event,
-  MessageSendPayload,
-  MessagePullPayload,
-  ServerConfig,
-} from '../types/models.js';
+import type { Msg, Event, MessagePullPayload, ServerConfig } from '../types/models.js';
+import type { ResolvedMessageSendPayload } from '../types/payloads.js';
 
 export class MessageBus {
   private messages: Msg[] = [];
@@ -25,7 +20,7 @@ export class MessageBus {
   /**
    * Send a message from one agent to another (or broadcast)
    */
-  send(payload: MessageSendPayload): Msg {
+  send(payload: ResolvedMessageSendPayload): Msg {
     const msg: Msg = {
       id: nanoid(12),
       ts: Date.now(),

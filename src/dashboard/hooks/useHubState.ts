@@ -9,19 +9,24 @@ export interface UseHubStateResult {
   state: HubState | null;
   error: string | null;
   isLoading: boolean;
+  refresh: () => void;
 }
 
-export function useHubState(hubUrl: string, pollInterval = 500): UseHubStateResult {
+export function useHubState(hubUrl: string, pollInterval = 500, paused = false): UseHubStateResult {
   const [state, setState] = useState<HubState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
-    let mounted = true;
+    const abortController = new AbortController();
+    let interval: NodeJS.Timeout | null = null;
 
     const fetchState = async (): Promise<void> => {
       try {
-        const response = await fetch(`${hubUrl}/state/live`);
+        const response = await fetch(`${hubUrl}/state/live`, {
+          signal: abortController.signal,
+        });
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -29,14 +34,13 @@ export function useHubState(hubUrl: string, pollInterval = 500): UseHubStateResu
 
         const data = (await response.json()) as HubState;
 
-        if (mounted) {
-          setState(data);
-          setError(null);
-          setIsLoading(false);
-        }
+        setState(data);
+        setError(null);
+        setIsLoading(false);
       } catch (err) {
-        if (mounted) {
-          setError(err instanceof Error ? err.message : 'Unknown error');
+        // Don't set error state on intentional abort
+        if (err instanceof Error && err.name !== 'AbortError') {
+          setError(err.message);
           setIsLoading(false);
         }
       }
@@ -45,16 +49,27 @@ export function useHubState(hubUrl: string, pollInterval = 500): UseHubStateResu
     // Initial fetch
     void fetchState();
 
-    // Set up polling
-    const interval = setInterval(() => {
-      void fetchState();
-    }, pollInterval);
+    // Set up polling only if not paused
+    if (!paused) {
+      interval = setInterval(() => {
+        void fetchState();
+      }, pollInterval);
+    }
 
     return () => {
-      mounted = false;
-      clearInterval(interval);
+      abortController.abort();
+      if (interval !== null) {
+        clearInterval(interval);
+      }
     };
-  }, [hubUrl, pollInterval]);
+  }, [hubUrl, pollInterval, paused, refreshTrigger]);
 
-  return { state, error, isLoading };
+  return {
+    state,
+    error,
+    isLoading,
+    refresh: () => {
+      setRefreshTrigger((prev) => prev + 1);
+    },
+  };
 }

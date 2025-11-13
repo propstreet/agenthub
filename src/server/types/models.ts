@@ -3,6 +3,16 @@
  * Type-safe models for multi-agent coordination
  */
 
+import type {
+  IntentOpenPayload,
+  IntentClosePayload,
+  IntentRenewPayload,
+  IntentVotePayload,
+} from '../schemas/intents.js';
+import type { StateGetPayload } from '../schemas/state.js';
+import type { LeaseAnnouncePayload } from '../schemas/leases.js';
+import type { MessageSendPayload, MessagePullPayload } from '../schemas/messages.js';
+
 // ============================================================================
 // Base Types
 // ============================================================================
@@ -193,60 +203,26 @@ export type Event = WriteEvent | IntentEvent | ReviewEvent | EscalationEvent;
 // Operation Payloads (hub_op)
 // ============================================================================
 
-/** m.send payload */
-export interface MessageSendPayload {
-  from: string;
-  to?: string;
-  topic: string;
-  text: string;
-  att?: Record<string, unknown>;
-}
+/** m.send payload (from Zod schema) */
+export type { MessageSendPayload };
 
-/** m.pull payload */
-export interface MessagePullPayload {
-  agent: string;
-  since?: number;
-  limit?: number;
-}
+/** m.pull payload (from Zod schema) */
+export type { MessagePullPayload };
 
-/** i.open payload */
-export interface IntentOpenPayload {
-  agent: string;
-  paths: string[];
-  mode: Mode;
-  priority: Priority;
-  ttlMs: number;
-  hunks?: string[];
-}
+/** i.open payload (from Zod schema) */
+export type { IntentOpenPayload };
 
-/** i.vote payload */
-export interface IntentVotePayload {
-  id: string;
-  agent: string;
-  vote: Vote;
-  reason?: string;
-}
+/** i.vote payload (from Zod schema) */
+export type { IntentVotePayload };
 
-/** i.renew payload */
-export interface IntentRenewPayload {
-  id: string;
-  ttlMs: number;
-}
+/** i.renew payload (from Zod schema) */
+export type { IntentRenewPayload };
 
-/** i.close payload */
-export interface IntentClosePayload {
-  id: string;
-  status: CloseStatus;
-  note?: string;
-}
+/** i.close payload (from Zod schema) */
+export type { IntentClosePayload };
 
-/** l.announce payload */
-export interface LeaseAnnouncePayload {
-  agent: string;
-  paths: string[];
-  mode: Mode;
-  ttlMs: number;
-}
+/** l.announce payload (from Zod schema) */
+export type { LeaseAnnouncePayload };
 
 /** g.review payload */
 export interface ReviewRequestPayload {
@@ -262,10 +238,8 @@ export interface ExpertAskPayload {
   verb?: 'low' | 'medium' | 'high'; // verbosity
 }
 
-/** s.get payload */
-export interface StateGetPayload {
-  since?: number;
-}
+/** s.get payload (from Zod schema) */
+export type { StateGetPayload };
 
 /** Union of all operation payloads */
 export type OpPayload =
@@ -319,10 +293,17 @@ export interface ServerConfig {
   port: number;
   host: string;
   watchRoot?: string;
+  logLevel: 'info' | 'debug';
   azureOpenAI?: {
     endpoint: string;
     apiKey?: string;
     deployment: string;
+  };
+  persistence?: {
+    enabled: boolean;
+    snapshotPath: string;
+    intervalMs: number;
+    autoRestore: boolean;
   };
   limits: {
     maxIntents: number;
@@ -343,6 +324,7 @@ export interface ServerConfig {
 export const DEFAULT_CONFIG: ServerConfig = {
   port: 3333,
   host: 'localhost',
+  logLevel: 'info',
   limits: {
     maxIntents: 50,
     maxLeases: 100,

@@ -5,12 +5,7 @@
 import type { HubOpResponse, Agent } from '../types/models.js';
 import type { StateCache } from '../core/state-cache.js';
 import { getCurrentSessionId } from '../session-context.js';
-
-export interface AgentRegisterPayload {
-  name?: string;
-  role: string[];
-  version?: string;
-}
+import { AgentRegisterSchema } from '../schemas/agents.js';
 
 const ADJECTIVES = [
   'Caffeinated',
@@ -59,8 +54,8 @@ const NOUNS = [
 ];
 
 function generateFunnyName(): string {
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)] ?? 'Mystery';
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)] ?? 'Agent';
   const num = Math.floor(Math.random() * 1000);
   return `${adj}${noun}${num}`;
 }
@@ -70,15 +65,8 @@ export async function handleAgentRegister(
   payload: unknown,
 ): Promise<HubOpResponse<Agent>> {
   try {
-    const data = payload as AgentRegisterPayload;
-
-    if (!data.role || !Array.isArray(data.role)) {
-      return {
-        ok: false,
-        error: 'Invalid payload: role[] required',
-        t: Date.now(),
-      };
-    }
+    // Use Zod schema for validation and normalization
+    const data = AgentRegisterSchema.parse(payload);
 
     // Get session ID from request context
     const sessionId = getCurrentSessionId();

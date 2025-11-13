@@ -8,15 +8,17 @@ import micromatch from 'micromatch';
 import type {
   Intent,
   Lease,
-  IntentOpenPayload,
-  IntentVotePayload,
   IntentRenewPayload,
   IntentClosePayload,
-  LeaseAnnouncePayload,
   IntentOpenResponse,
   ServerConfig,
   Priority,
 } from '../types/models.js';
+import type {
+  ResolvedIntentOpenPayload,
+  ResolvedIntentVotePayload,
+  ResolvedLeaseAnnouncePayload,
+} from '../types/payloads.js';
 import type { MessageBus } from './bus.js';
 import type { StateCache } from './state-cache.js';
 
@@ -50,7 +52,7 @@ export class Coordinator {
    * Phase 1: Open an intent - declare what you plan to do
    * Returns conflicts and broadcasts to other agents for voting
    */
-  openIntent(payload: IntentOpenPayload): IntentOpenResponse {
+  openIntent(payload: ResolvedIntentOpenPayload): IntentOpenResponse {
     const intent: Intent = {
       id: nanoid(12),
       agent: payload.agent,
@@ -108,7 +110,7 @@ export class Coordinator {
   /**
    * Phase 2: Vote on an intent (ACK/NACK)
    */
-  voteIntent(payload: IntentVotePayload): { ok: boolean; message?: string } {
+  voteIntent(payload: ResolvedIntentVotePayload): { ok: boolean; message?: string } {
     const intent = this.state.getIntent(payload.id);
 
     if (intent === undefined) {
@@ -263,7 +265,7 @@ export class Coordinator {
   /**
    * Announce a lease (advisory lock)
    */
-  announceLease(payload: LeaseAnnouncePayload): { id: string } {
+  announceLease(payload: ResolvedLeaseAnnouncePayload): { id: string } {
     const lease: Lease = {
       id: nanoid(12),
       agent: payload.agent,

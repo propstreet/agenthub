@@ -10,6 +10,7 @@ import { StateCache } from './core/state-cache.js';
 import { Coordinator } from './core/coordinator.js';
 import { FilesystemWatcher } from './core/watcher.js';
 import { ExpertBridge } from './core/expert-bridge.js';
+import { PersistenceManager } from './core/persistence.js';
 import { createMCPServer } from './server.js';
 import { createHttpTransport } from './transports/http.js';
 import { DEFAULT_CONFIG, type ServerConfig } from './types/models.js';
@@ -22,11 +23,13 @@ loadEnv();
  */
 function loadConfig(): ServerConfig {
   const watchRoot = process.env['WATCH_ROOT'];
+  const logLevel = process.env['LOG_LEVEL'];
 
   const config: ServerConfig = {
     ...DEFAULT_CONFIG,
     port: Number.parseInt(process.env['PORT'] ?? '3333', 10),
     host: process.env['HOST'] ?? 'localhost',
+    logLevel: logLevel === 'debug' ? 'debug' : 'info',
     ...(watchRoot !== undefined && watchRoot.length > 0 && { watchRoot }),
   };
 
@@ -39,6 +42,17 @@ function loadConfig(): ServerConfig {
       endpoint: azureEndpoint,
       ...(apiKey !== undefined && apiKey.length > 0 && { apiKey }),
       deployment: process.env['AZURE_EXPERT_DEPLOYMENT'] ?? 'gpt-5-pro',
+    };
+  }
+
+  // Persistence configuration (optional)
+  const persistenceEnabled = process.env['PERSISTENCE_ENABLED'] === 'true';
+  if (persistenceEnabled) {
+    config.persistence = {
+      enabled: true,
+      snapshotPath: process.env['PERSISTENCE_PATH'] ?? '.agenthub/state.json',
+      intervalMs: Number.parseInt(process.env['PERSISTENCE_INTERVAL'] ?? '60000', 10),
+      autoRestore: process.env['PERSISTENCE_AUTO_RESTORE'] !== 'false',
     };
   }
 
@@ -62,6 +76,9 @@ async function main(): Promise<void> {
   console.log(
     `  Azure OpenAI: ${config.azureOpenAI !== undefined ? 'configured' : 'not configured'}`,
   );
+  console.log(
+    `  Persistence: ${config.persistence !== undefined ? `enabled (${config.persistence.snapshotPath})` : 'disabled'}`,
+  );
   console.log();
 
   // Initialize core components
@@ -72,6 +89,22 @@ async function main(): Promise<void> {
 
   const state = new StateCache(bus, config);
   console.log('✓ State Cache');
+
+  // Initialize persistence and restore state if enabled
+  let persistence: PersistenceManager | null = null;
+  if (config.persistence !== undefined) {
+    persistence = new PersistenceManager(config.persistence);
+
+    if (config.persistence.autoRestore) {
+      const snapshot = await persistence.load();
+      if (snapshot !== undefined) {
+        state.restore(snapshot);
+      }
+    }
+
+    persistence.startAutoSave(state);
+    console.log('✓ Persistence Manager');
+  }
 
   const coordinator = new Coordinator(bus, state, config);
   console.log('✓ Intent Coordinator');
@@ -90,7 +123,14 @@ async function main(): Promise<void> {
   // Create and start MCP server
   console.log('\nStarting MCP server...');
   const mcpServer = createMCPServer(bus, state, coordinator, expert);
-  const httpApp = createHttpTransport(mcpServer, state, config.port, config.host);
+  const httpApp = createHttpTransport(
+    mcpServer,
+    bus,
+    state,
+    config.port,
+    config.host,
+    config.logLevel,
+  );
 
   console.log(`\n${'='.repeat(60)}`);
   console.log('AgentHub is ready!');
@@ -102,7 +142,7 @@ async function main(): Promise<void> {
 
   // Graceful shutdown
   let shutdownInProgress = false;
-  process.on('SIGINT', () => {
+  process.on('SIGINT', async () => {
     if (shutdownInProgress) {
       console.log('[SIGINT] Already shutting down, ignoring duplicate signal');
       return;
@@ -115,14 +155,20 @@ async function main(): Promise<void> {
 
     // Check active handles before cleanup (Node internal debugging)
     const processWithHandles = process as typeof process & {
-      _getActiveHandles?: () => any[];
+      _getActiveHandles?: () => unknown[];
     };
     if (processWithHandles._getActiveHandles !== undefined) {
       const handlesBefore = processWithHandles._getActiveHandles();
       console.log(`[SIGINT] Active handles before cleanup: ${handlesBefore.length}`);
       console.log(
         '[SIGINT] Handle types:',
-        handlesBefore.map((h: any) => h.constructor.name).join(', '),
+        handlesBefore
+          .map((h: unknown) =>
+            typeof h === 'object' && h !== null && 'constructor' in h
+              ? (h.constructor as { name: string }).name
+              : 'unknown',
+          )
+          .join(', '),
       );
     }
 
@@ -142,11 +188,14 @@ async function main(): Promise<void> {
         });
 
         // Force close without callback
-        server.closeAllConnections?.(); // Node 18.2+ method
+        if ('closeAllConnections' in server && typeof server.closeAllConnections === 'function') {
+          server.closeAllConnections(); // Node 18.2+ method
+        }
         server.close();
         console.log('[SIGINT] ✓ HTTP server closed');
       } catch (error) {
-        console.log(`[SIGINT] HTTP server close error (ignoring): ${error}`);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.log(`[SIGINT] HTTP server close error (ignoring): ${errorMessage}`);
       }
     }
 
@@ -157,6 +206,20 @@ async function main(): Promise<void> {
     console.log('[SIGINT] Clearing vote timers...');
     coordinator.clearVoteTimers();
     console.log('[SIGINT] ✓ Vote timers cleared');
+
+    // Save final snapshot before clearing state
+    if (persistence !== null) {
+      console.log('[SIGINT] Saving final snapshot...');
+      persistence.stopAutoSave();
+      try {
+        const snapshot = state.getSnapshot();
+        await persistence.save(snapshot);
+        console.log('[SIGINT] ✓ Final snapshot saved');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.log(`[SIGINT] Final snapshot save failed (ignoring): ${errorMessage}`);
+      }
+    }
 
     console.log('[SIGINT] Clearing message bus...');
     bus.clear();
@@ -172,7 +235,13 @@ async function main(): Promise<void> {
       console.log(`[SIGINT] Active handles after cleanup: ${handlesAfter.length}`);
       console.log(
         '[SIGINT] Handle types:',
-        handlesAfter.map((h: any) => h.constructor.name).join(', '),
+        handlesAfter
+          .map((h: unknown) =>
+            typeof h === 'object' && h !== null && 'constructor' in h
+              ? (h.constructor as { name: string }).name
+              : 'unknown',
+          )
+          .join(', '),
       );
     }
 

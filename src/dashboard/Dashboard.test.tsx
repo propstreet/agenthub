@@ -59,8 +59,15 @@ describe('Dashboard', () => {
     ts: Date.now(),
   };
 
+  const mockProps = {
+    state: mockState,
+    paused: false,
+    onTogglePause: () => undefined,
+    onRefresh: () => undefined,
+  };
+
   it('renders dashboard header', () => {
-    const { lastFrame } = render(<Dashboard state={mockState} />);
+    const { lastFrame } = render(<Dashboard {...mockProps} />);
 
     // BigText renders "AgentHub" as ASCII art, check for the Dashboard title instead
     expect(lastFrame()).toContain('Multi-Agent Coordination Dashboard');
@@ -68,7 +75,7 @@ describe('Dashboard', () => {
   });
 
   it('displays agent count', () => {
-    const { lastFrame } = render(<Dashboard state={mockState} />);
+    const { lastFrame } = render(<Dashboard {...mockProps} />);
 
     expect(lastFrame()).toContain('Active Agents (2)');
     expect(lastFrame()).toContain('agent-1');
@@ -76,7 +83,7 @@ describe('Dashboard', () => {
   });
 
   it('displays intent information', () => {
-    const { lastFrame } = render(<Dashboard state={mockState} />);
+    const { lastFrame } = render(<Dashboard {...mockProps} />);
 
     expect(lastFrame()).toContain('Active Intents (1)');
     expect(lastFrame()).toContain('agent-1');
@@ -84,7 +91,7 @@ describe('Dashboard', () => {
   });
 
   it('displays recent events', () => {
-    const { lastFrame } = render(<Dashboard state={mockState} />);
+    const { lastFrame } = render(<Dashboard {...mockProps} />);
 
     expect(lastFrame()).toContain('Recent Events (2)');
     // File paths may be truncated in the UI, check for partial match
@@ -93,11 +100,11 @@ describe('Dashboard', () => {
   });
 
   it('displays keyboard controls', () => {
-    const { lastFrame } = render(<Dashboard state={mockState} />);
+    const { lastFrame } = render(<Dashboard {...mockProps} />);
 
-    // Controls show with keyboard hints like [R]efresh
-    expect(lastFrame()).toContain('[R]efresh');
+    // Controls show with keyboard hints like [P]ause, [B]roadcast
     expect(lastFrame()).toContain('[P]ause');
+    expect(lastFrame()).toContain('[B]roadcast');
     expect(lastFrame()).toContain('[Q]uit');
   });
 
@@ -113,7 +120,14 @@ describe('Dashboard', () => {
       ts: Date.now(),
     };
 
-    const { lastFrame } = render(<Dashboard state={emptyState} />);
+    const emptyProps = {
+      state: emptyState,
+      paused: false,
+      onTogglePause: () => undefined,
+      onRefresh: () => undefined,
+    };
+
+    const { lastFrame } = render(<Dashboard {...emptyProps} />);
 
     expect(lastFrame()).toContain('No agents connected');
     expect(lastFrame()).toContain('No active intents');
@@ -121,7 +135,7 @@ describe('Dashboard', () => {
   });
 
   it('updates on state change', () => {
-    const { lastFrame, rerender } = render(<Dashboard state={mockState} />);
+    const { lastFrame, rerender } = render(<Dashboard {...mockProps} />);
 
     expect(lastFrame()).toContain('Active Intents (1)');
 
@@ -143,14 +157,15 @@ describe('Dashboard', () => {
       ],
     };
 
-    rerender(<Dashboard state={updatedState} />);
+    const updatedProps = { ...mockProps, state: updatedState };
+    rerender(<Dashboard {...updatedProps} />);
 
     expect(lastFrame()).toContain('Active Intents (2)');
     expect(lastFrame()).toContain('i_def456');
   });
 
   it('displays agent status correctly', () => {
-    const { lastFrame } = render(<Dashboard state={mockState} />);
+    const { lastFrame } = render(<Dashboard {...mockProps} />);
 
     // Active agent should show green indicator
     expect(lastFrame()).toContain('●');
@@ -160,17 +175,27 @@ describe('Dashboard', () => {
   });
 
   it('shows conflict indicators', () => {
+    const firstIntent = mockState.intents[0];
+    if (firstIntent === undefined) {
+      throw new Error('Test setup error: no intent found');
+    }
+
     const stateWithConflict: HubState = {
       ...mockState,
       intents: [
         {
-          ...mockState.intents[0]!,
+          ...firstIntent,
           conflicts: ['i_other123'],
         },
       ],
     };
 
-    const { lastFrame } = render(<Dashboard state={stateWithConflict} />);
+    const conflictProps = {
+      ...mockProps,
+      state: stateWithConflict,
+    };
+
+    const { lastFrame } = render(<Dashboard {...conflictProps} />);
 
     expect(lastFrame()).toContain('⚠️');
   });

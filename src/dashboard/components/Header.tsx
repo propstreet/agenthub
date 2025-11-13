@@ -8,9 +8,10 @@ import BigText from 'ink-big-text';
 
 export interface HeaderProps {
   timestamp: number;
+  paused: boolean;
 }
 
-export function Header({ timestamp }: HeaderProps) {
+export function Header({ timestamp, paused }: HeaderProps) {
   const formattedTime = new Date(timestamp).toLocaleTimeString('en-US', {
     hour12: false,
   });
@@ -24,9 +25,13 @@ export function Header({ timestamp }: HeaderProps) {
       </Gradient>
 
       <Box justifyContent="space-between">
-        <Text bold color="cyan">
-          🤖 Multi-Agent Coordination Dashboard
-        </Text>
+        <Box>
+          <Text bold color="cyan">
+            🤖 Multi-Agent Coordination Dashboard
+          </Text>
+          <Text dimColor> | </Text>
+          <Text color={paused ? 'yellow' : 'green'}>Auto-refresh: {paused ? 'OFF' : 'ON'}</Text>
+        </Box>
         <Text dimColor>
           {formattedDate} {formattedTime}
         </Text>

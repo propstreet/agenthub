@@ -1,17 +1,13 @@
 /**
- * Lease operation handlers (l.ann)
+ * Lease operation handlers (l.announce)
  */
 
-import type { LeaseAnnouncePayload, HubOpResponse } from '../types/models.js';
+import type { HubOpResponse } from '../types/models.js';
 import type { Coordinator } from '../core/coordinator.js';
 import type { StateCache } from '../core/state-cache.js';
 import { getCurrentSessionId } from '../session-context.js';
-import {
-  resolveAgent,
-  normalizePayload,
-  applyDefaults,
-  requireAgent,
-} from './base-handler.js';
+import { resolveAgent, requireAgent } from './base-handler.js';
+import { LeaseAnnounceSchema } from '../schemas/leases.js';
 
 export async function handleLeaseAnnounce(
   state: StateCache,
@@ -19,14 +15,20 @@ export async function handleLeaseAnnounce(
   payload: unknown,
 ): Promise<HubOpResponse> {
   try {
-    // Normalize field variants and apply defaults
-    const normalized = applyDefaults(normalizePayload(payload));
+    // Use Zod schema for validation and normalization
+    const normalized = LeaseAnnounceSchema.parse(payload);
 
-    // Auto-populate agent if not provided
-    const agent = resolveAgent(normalized, state);
+    // Auto-populate agent if not provided (session-aware)
+    const agent = normalized.agent ?? resolveAgent(normalized, state);
     requireAgent(agent);
 
-    const data: LeaseAnnouncePayload = {
+    // Construct resolved payload with required agent field
+    const data: {
+      agent: string;
+      paths: string[];
+      mode: 'R' | 'W' | 'B' | 'T';
+      ttlMs: number;
+    } = {
       agent,
       paths: normalized.paths,
       mode: normalized.mode,

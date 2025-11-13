@@ -19,10 +19,11 @@ import {
 } from './tools/intents.js';
 import { handleLeaseAnnounce } from './tools/leases.js';
 import { handleMessageSend, handleMessagePull } from './tools/messages.js';
-import { handleReviewRequest } from './tools/review.js';
+import { handleReviewRequest, handleReviewClaim, handleReviewComplete } from './tools/review.js';
 import { handleExpertAsk } from './tools/expert.js';
 import { handleStateGet } from './tools/state.js';
 import { handleAgentRegister } from './tools/agents.js';
+import { handleHelp } from './tools/help.js';
 
 // Resource handlers
 import { handleInboxResource } from './resources/inbox.js';
@@ -49,8 +50,8 @@ export function createMCPServer(
       title: 'Hub Operation',
       description:
         'Multi-agent coordination. Ops: a.register (agent), i.open|i.vote|i.renew|i.close (intents), ' +
-        'l.announce (lease), m.send|m.pull (messages), review.request (code review), ' +
-        'expert.ask (escalation), s.get (state). ' +
+        'l.announce (lease), m.send|m.pull (messages), review.request|review.claim|review.complete (code review), ' +
+        'expert.ask (escalation), s.get (state), s.help (self-discovery). ' +
         'Fields: agent, paths[], mode(R|W|B|T), priority(l|n|h|r), ttlMs',
       inputSchema: {
         op: z.enum([
@@ -63,8 +64,11 @@ export function createMCPServer(
           'm.send',
           'm.pull',
           'review.request',
+          'review.claim',
+          'review.complete',
           'expert.ask',
           's.get',
+          's.help',
         ]),
         d: z.record(z.unknown()),
       },
@@ -112,6 +116,12 @@ export function createMCPServer(
           case 'review.request':
             result = await handleReviewRequest(bus, state, d);
             break;
+          case 'review.claim':
+            result = await handleReviewClaim(state, bus, d);
+            break;
+          case 'review.complete':
+            result = await handleReviewComplete(state, bus, d);
+            break;
 
           // Expert escalation
           case 'expert.ask':
@@ -121,6 +131,11 @@ export function createMCPServer(
           // State query
           case 's.get':
             result = await handleStateGet(state, d);
+            break;
+
+          // Help / self-discovery
+          case 's.help':
+            result = await handleHelp();
             break;
 
           default:
@@ -134,21 +149,24 @@ export function createMCPServer(
               text: JSON.stringify(result),
             },
           ],
+          structuredContent: result as unknown as Record<string, unknown>,
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorResult = {
+          ok: false,
+          error: errorMessage,
+          t: timestamp,
+        };
 
         return {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify({
-                ok: false,
-                error: errorMessage,
-                t: timestamp,
-              }),
+              text: JSON.stringify(errorResult),
             },
           ],
+          structuredContent: errorResult as unknown as Record<string, unknown>,
           isError: true,
         };
       }

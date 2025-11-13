@@ -15,4 +15,7 @@ export type HubState = StateSnapshot;
  */
 export interface DashboardProps {
   state: HubState;
+  paused: boolean;
+  onTogglePause: () => void;
+  onRefresh: () => void;
 }

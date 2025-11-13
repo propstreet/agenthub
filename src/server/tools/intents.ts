@@ -2,23 +2,17 @@
  * Intent operation handlers (i.open, i.vote, i.renew, i.close)
  */
 
-import type {
-  IntentOpenPayload,
-  IntentVotePayload,
-  IntentRenewPayload,
-  IntentClosePayload,
-  HubOpResponse,
-  IntentOpenResponse,
-} from '../types/models.js';
+import type { HubOpResponse, IntentOpenResponse } from '../types/models.js';
 import type { Coordinator } from '../core/coordinator.js';
 import type { StateCache } from '../core/state-cache.js';
 import { getCurrentSessionId } from '../session-context.js';
+import { resolveAgent, requireAgent } from './base-handler.js';
 import {
-  resolveAgent,
-  normalizePayload,
-  applyDefaults,
-  requireAgent,
-} from './base-handler.js';
+  IntentOpenSchema,
+  IntentCloseSchema,
+  IntentRenewSchema,
+  IntentVoteSchema,
+} from '../schemas/intents.js';
 
 export async function handleIntentOpen(
   state: StateCache,
@@ -26,14 +20,22 @@ export async function handleIntentOpen(
   payload: unknown,
 ): Promise<HubOpResponse<IntentOpenResponse>> {
   try {
-    // Normalize field variants and apply defaults
-    const normalized = applyDefaults(normalizePayload(payload));
+    // Use Zod schema for validation and normalization
+    const normalized = IntentOpenSchema.parse(payload);
 
-    // Auto-populate agent if not provided
-    const agent = resolveAgent(normalized, state);
+    // Auto-populate agent if not provided (session-aware)
+    const agent = normalized.agent ?? resolveAgent(normalized, state);
     requireAgent(agent);
 
-    const data: IntentOpenPayload = {
+    // Construct resolved payload with required agent field
+    const data: {
+      agent: string;
+      paths: string[];
+      mode: 'R' | 'W' | 'B' | 'T';
+      priority: 'l' | 'n' | 'h' | 'r';
+      ttlMs: number;
+      hunks?: string[];
+    } = {
       agent,
       paths: normalized.paths,
       mode: normalized.mode,
@@ -70,14 +72,20 @@ export async function handleIntentVote(
   payload: unknown,
 ): Promise<HubOpResponse> {
   try {
-    // Normalize field variants
-    const normalized = normalizePayload(payload);
+    // Use Zod schema for validation and normalization
+    const normalized = IntentVoteSchema.parse(payload);
 
-    // Auto-populate agent if not provided
-    const agent = resolveAgent(normalized, state);
+    // Auto-populate agent if not provided (session-aware)
+    const agent = normalized.agent ?? resolveAgent(normalized, state);
     requireAgent(agent);
 
-    const data: IntentVotePayload = {
+    // Construct resolved payload with required agent field
+    const data: {
+      id: string;
+      agent: string;
+      vote: 'ack' | 'nack';
+      reason?: string;
+    } = {
       id: normalized.id,
       agent,
       vote: normalized.vote,
@@ -112,13 +120,8 @@ export async function handleIntentRenew(
   payload: unknown,
 ): Promise<HubOpResponse> {
   try {
-    // Normalize field variants and apply defaults
-    const normalized = applyDefaults(normalizePayload(payload));
-
-    const data: IntentRenewPayload = {
-      id: normalized.id,
-      ttlMs: normalized.ttlMs,
-    };
+    // Use Zod schema for validation and normalization
+    const data = IntentRenewSchema.parse(payload);
 
     // Validate agent ownership by looking up the intent
     const sessionId = getCurrentSessionId();
@@ -151,14 +154,8 @@ export async function handleIntentClose(
   payload: unknown,
 ): Promise<HubOpResponse> {
   try {
-    // Normalize field variants
-    const normalized = normalizePayload(payload);
-
-    const data: IntentClosePayload = {
-      id: normalized.id,
-      status: normalized.status,
-      ...(normalized.note !== undefined && { note: normalized.note }),
-    };
+    // NEW: Use Zod schema for validation and normalization
+    const data = IntentCloseSchema.parse(payload);
 
     // Validate agent ownership by looking up the intent
     const sessionId = getCurrentSessionId();

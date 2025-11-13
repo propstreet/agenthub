@@ -59,7 +59,7 @@ export function EventLog({ events, maxEvents = 10 }: EventLogProps) {
       ) : (
         <Box flexDirection="column">
           {recentEvents.map((event, index) => (
-            <Box key={`${event.ts}-${index}`} marginBottom={1}>
+            <Box key={`${event.ts.toString()}-${index.toString()}`} marginBottom={1}>
               <Box width={12}>
                 <Text dimColor>{formatTime(event.ts)}</Text>
               </Box>

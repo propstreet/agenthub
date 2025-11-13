@@ -34,5 +34,9 @@ coverage/
 tmp/
 temp/
 
+# Persistence state
+.agenthub/*.json
+.agenthub/*.tmp
+
 # Claude Code settings
 .claude/settings.local.json
