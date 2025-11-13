@@ -229,7 +229,7 @@ Get help on available operations:
   "op": "i.close",
   "d": {
     "id": "intent_abc123",
-    "status": "done",
+    "status": "ok",
     "note": "Changes complete"
   }
 }

@@ -184,9 +184,8 @@ export async function handleHelp(): Promise<HubOpResponse> {
         },
         {
           name: 'status',
-          type: 'done | cancelled | expired | error',
-          required: false,
-          default: 'done',
+          type: 'ok | abort',
+          required: true,
           variants: ['s'],
           description: 'Completion status',
         },
@@ -200,7 +199,7 @@ export async function handleHelp(): Promise<HubOpResponse> {
       ],
       example: {
         id: 'intent_abc123',
-        status: 'done',
+        status: 'ok',
         note: 'Successfully implemented feature',
       },
     },
