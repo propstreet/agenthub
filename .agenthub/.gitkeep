@@ -1,0 +1,2 @@
+# This directory stores persistent state snapshots
+# state.json is gitignored but the directory structure is preserved

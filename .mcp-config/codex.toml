@@ -1,0 +1,8 @@
+# Codex CLI / IDE Configuration
+# Add this to ~/.codex/config.toml
+
+[mcp_servers.agenthub]
+url = "http://localhost:3333/mcp"
+
+[features]
+rmcp_client = true
