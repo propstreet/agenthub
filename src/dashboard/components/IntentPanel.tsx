@@ -80,17 +80,14 @@ export function IntentPanel({ intents }: IntentPanelProps) {
           {intents.map((intent) => (
             <Box key={intent.id} alignItems="center">
               <Box width={ID_MAX + 2} marginRight={1}>
-                <Text dimColor wrap="truncate-end">{truncate(intent.id, ID_MAX)}</Text>
+                <Text dimColor wrap="truncate-end">
+                  {truncate(intent.id, ID_MAX)}
+                </Text>
               </Box>
               <Box width={AGENT_MAX + 2} marginRight={1}>
                 <Text wrap="truncate-end">{truncate(intent.agent, AGENT_MAX)}</Text>
               </Box>
-              <Box
-                width={ICON_WIDTH}
-                marginRight={1}
-                alignItems="center"
-                justifyContent="center"
-              >
+              <Box width={ICON_WIDTH} marginRight={1} alignItems="center" justifyContent="center">
                 <Text color={getModeColor(intent.mode)}>{getModeIcon(intent.mode)}</Text>
               </Box>
               <Box width={MODE_WIDTH} marginRight={1} alignItems="center" justifyContent="center">

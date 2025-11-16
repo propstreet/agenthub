@@ -5,7 +5,7 @@
 AgentHub is a lightweight, local-only MCP (Model Context Protocol) server that enables multiple coding agents (Claude Code, Cursor, VS Code, etc.) to coordinate edits, reviews, and escalations without file locking conflicts.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
 
 ## Features
@@ -24,7 +24,7 @@ AgentHub is a lightweight, local-only MCP (Model Context Protocol) server that e
 
 ### Prerequisites
 
-- Node.js >=20.0.0 (Node 25 recommended)
+- Node.js >=22.0.0 (Node 25 recommended)
 - npm or yarn
 
 ### Installation

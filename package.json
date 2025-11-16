@@ -2,21 +2,27 @@
   "name": "@propstreet/agenthub",
   "version": "1.0.0",
   "description": "Lean MCP orchestrator for coordinating multiple coding agents",
+  "mcpName": "io.github.propstreet/agenthub",
   "type": "module",
   "main": "dist/server/index.js",
   "types": "dist/server/index.d.ts",
   "bin": {
-    "agenthub": "./dist/server/index.js",
-    "agentboard": "./dist/dashboard/index.js"
+    "agenthub": "dist/server/index.js",
+    "agentboard": "dist/dashboard/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "tsx watch src/server/index.ts",
     "dashboard": "tsx src/dashboard/index.tsx",
-    "build": "tsc",
+    "build": "tsc && shx chmod +x dist/server/index.js dist/dashboard/index.js",
     "build:server": "tsc --project tsconfig.json",
     "build:dashboard": "npm run build && chmod +x dist/dashboard/index.js",
     "start": "node dist/server/index.js",
     "agentboard": "node dist/dashboard/index.js",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run check",
     "test": "vitest",
     "test:dashboard": "vitest --run src/dashboard",
     "lint": "eslint .",
@@ -37,10 +43,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/propstreet/agenthub"
+    "url": "git+https://github.com/propstreet/agenthub.git"
   },
+  "homepage": "https://github.com/propstreet/agenthub#readme",
+  "bugs": "https://github.com/propstreet/agenthub/issues",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
@@ -73,6 +81,7 @@
     "globals": "^16.5.0",
     "ink-testing-library": "^4.0.0",
     "prettier": "^3.6.2",
+    "shx": "^0.4.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",

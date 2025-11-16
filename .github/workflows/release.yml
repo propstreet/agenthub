@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24' # Includes npm 11.6.0 with OIDC support
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality checks
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify build outputs
+        run: |
+          ls -la dist/server/index.js dist/dashboard/index.js
+          head -n 1 dist/server/index.js dist/dashboard/index.js
+
+      - name: Publish to npm (OIDC trusted publishing)
+        run: npm publish --access public
+        # Uses OIDC authentication via id-token permission (no NPM_TOKEN needed)
+        # Provenance attestations generated automatically
+        # Configure trusted publisher: npmjs.com/package/@propstreet/agenthub/settings
+        # Required: Org=propstreet, Repo=agenthub, Workflow=release.yml
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            ## AgentHub ${{ steps.version.outputs.VERSION }}
+
+            Published to npm: [@propstreet/agenthub@${{ steps.version.outputs.VERSION }}](https://www.npmjs.com/package/@propstreet/agenthub/v/${{ steps.version.outputs.VERSION }})
+
+            **Supply Chain Security**: This release includes automatic provenance attestations via npm Trusted Publishing.
+
+            See [CHANGELOG.md](https://github.com/propstreet/agenthub/blob/main/CHANGELOG.md) for details.
+          draft: false
+          prerelease: false

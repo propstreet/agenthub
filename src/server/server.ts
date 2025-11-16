@@ -144,7 +144,7 @@ export function createMCPServer(
         }
 
         // Add inbox notification and broadcasts (except for m.pull which already shows messages)
-        if (op !== 'm.pull' && op !== 's.help' && typeof result === 'object' && result !== null) {
+        if (op !== 'm.pull' && op !== 's.help' && typeof result === 'object') {
           const agentName =
             (d['agent'] as string | undefined) ??
             (d['a'] as string | undefined) ??
@@ -155,7 +155,9 @@ export function createMCPServer(
             const allMessages = bus.getMessagesFor(agentName);
 
             // Separate broadcasts from direct messages
-            const broadcasts = allMessages.filter((msg) => msg.to === undefined && msg.from !== agentName);
+            const broadcasts = allMessages.filter(
+              (msg) => msg.to === undefined && msg.from !== agentName,
+            );
             const directMessages = allMessages.filter((msg) => msg.to === agentName);
 
             const modifiedResult = result as { inbox?: unknown; broadcasts?: unknown };
@@ -172,12 +174,12 @@ export function createMCPServer(
                   ts: msg.ts,
                 }));
 
-              modifiedResult['broadcasts'] = recentBroadcasts;
+              modifiedResult.broadcasts = recentBroadcasts;
             }
 
             // Notify about direct messages
             if (directMessages.length > 0) {
-              modifiedResult['inbox'] = {
+              modifiedResult.inbox = {
                 unread: directMessages.length,
                 hint: `You have ${directMessages.length} direct message${directMessages.length === 1 ? '' : 's'}. Run m.pull to read.`,
               };
