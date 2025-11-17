@@ -49,6 +49,17 @@ jobs:
         # Configure trusted publisher: npmjs.com/package/@propstreet/agenthub/settings
         # Required: Org=propstreet, Repo=agenthub, Workflow=release.yml
 
+      - name: Install MCP Publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          chmod +x mcp-publisher
+
+      - name: Login to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
+
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
@@ -63,7 +74,9 @@ jobs:
           body: |
             ## AgentHub ${{ steps.version.outputs.VERSION }}
 
-            Published to npm: [@propstreet/agenthub@${{ steps.version.outputs.VERSION }}](https://www.npmjs.com/package/@propstreet/agenthub/v/${{ steps.version.outputs.VERSION }})
+            **Published to:**
+            - npm: [@propstreet/agenthub@${{ steps.version.outputs.VERSION }}](https://www.npmjs.com/package/@propstreet/agenthub/v/${{ steps.version.outputs.VERSION }})
+            - MCP Registry: [io.github.propstreet/agenthub](https://registry.modelcontextprotocol.io/servers/io.github.propstreet/agenthub)
 
             **Supply Chain Security**: This release includes automatic provenance attestations via npm Trusted Publishing.
 
