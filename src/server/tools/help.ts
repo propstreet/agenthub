@@ -3,6 +3,7 @@
  * Provides self-discovery of available operations and their schemas
  */
 
+import packageJson from '../../../package.json' with { type: 'json' };
 import type { HubOpResponse } from '../types/models.js';
 
 export interface OperationHelp {
@@ -549,7 +550,7 @@ export async function handleHelp(): Promise<HubOpResponse> {
   return {
     ok: true,
     d: {
-      version: '1.0.0',
+      version: packageJson.version,
       operations,
       legend: {
         modes: {

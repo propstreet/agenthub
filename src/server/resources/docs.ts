@@ -3,13 +3,15 @@
  * Provides comprehensive API reference as an MCP resource
  */
 
+import packageJson from '../../../package.json' with { type: 'json' };
+
 /**
  * Handle docs://reference resource
  */
 export function handleDocsResource(): string {
   const docs = {
     title: 'AgentHub API Reference',
-    version: '1.0.0',
+    version: packageJson.version,
     description:
       'Complete reference for AgentHub MCP operations. AgentHub enables AI agents to coordinate edits, reviews, and escalations without file locking conflicts.',
 
