@@ -3,12 +3,12 @@
   "name": "io.github.propstreet/agenthub",
   "title": "AgentHub - Lean MCP Orchestrator",
   "description": "Enables coding agents to coordinate edits, reviews, and escalations without file locking conflicts",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@propstreet/agenthub",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:3333/mcp"
