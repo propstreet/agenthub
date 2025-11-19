@@ -55,7 +55,7 @@ export class ExpertBridge {
       } else {
         // Entra ID (Azure AD) authentication
         // Note: v1 endpoint with Entra ID not yet supported
-        // Recommend using API key for expert.ask
+        // Recommend using API key for expert.request
         logger.warn(
           '[ExpertBridge] Entra ID authentication not supported for v1 endpoint yet. Please use AZURE_OPENAI_API_KEY.',
         );

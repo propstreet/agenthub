@@ -14,7 +14,7 @@ import { ExpertWorker } from './core/expert-worker.js';
 import { PersistenceManager } from './core/persistence.js';
 import { createMCPServer } from './server.js';
 import { createHttpTransport } from './transports/http.js';
-import { DEFAULT_CONFIG, type ServerConfig } from './types/models.js';
+import { DEFAULT_CONFIG, type ServerConfig, type StateSnapshot } from './types/models.js';
 
 // Load environment variables
 loadEnv();
@@ -262,7 +262,7 @@ async function main(): Promise<void> {
       console.log('[SIGINT] Saving final snapshot...');
       persistence.stopAutoSave();
       try {
-        const snapshot = state.getSnapshot();
+        const snapshot = state.getSnapshot() as StateSnapshot;
         await persistence.save(snapshot);
         console.log('[SIGINT] ✓ Final snapshot saved');
       } catch (error) {

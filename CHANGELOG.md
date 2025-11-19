@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Zombie Reviews**: Completed reviews are now properly cleaned up if their originating agent disconnects.
 - **Input Handling**: Fixed `Q` (quit) command not working in dashboard watch mode.
 - **Type Safety**: Improved Zod schemas to properly handle optional TTLs and defaults.
+- **State Verbosity**: `s.get` now strictly adheres to filters, preventing massive JSON dumps.
+- **Agent UX**: `a.register` now implicitly respects existing session bindings, allowing role updates without re-specifying agent name.
+- **Queue Reporting**: `expert.request` now correctly reports global queue position.
+- **Notifications**: Added conflict warnings and expert completion summaries to agent inbox.
+- **Schema Compatibility**: `i.renew`, `i.vote`, and `i.close` now accept `intentId` alias and `approve`/`defer` aliases for better CLI compatibility.
 
 ## [1.0.0] - 2025-11-15
 

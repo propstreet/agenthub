@@ -70,6 +70,26 @@ export class Coordinator {
     const conflicts = this.detectConflicts(intent);
     if (conflicts.length > 0) {
       intent.conflicts = conflicts;
+
+      // Notify existing intent owners about the conflict
+      for (const conflictId of conflicts) {
+        const existing = this.state.getIntent(conflictId);
+        if (existing !== undefined) {
+          this.bus.send({
+            from: 'coordinator',
+            to: existing.agent,
+            type: 'chat',
+            topic: 'CONFLICT_WARNING',
+            text: `Review conflict with intent ${intent.id} from ${intent.agent}`,
+            data: {
+              myIntent: existing.id,
+              newIntent: intent.id,
+              newAgent: intent.agent,
+              paths: intent.paths,
+            },
+          });
+        }
+      }
     }
 
     // Add to state cache

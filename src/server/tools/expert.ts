@@ -50,7 +50,7 @@ export async function handleExpertRequest(
 
     // Check pending limit
     const agentRequests = state.getExpertRequestsForAgent(agent);
-    const pending = agentRequests.filter(
+    const agentPending = agentRequests.filter(
       (r) => r.status === 'pending' || r.status === 'queued' || r.status === 'in_progress',
     );
 
@@ -58,13 +58,19 @@ export async function handleExpertRequest(
     const expertConfig = state.getExpertConfig();
     const maxPending = expertConfig?.maxPendingPerAgent ?? 3;
 
-    if (pending.length >= maxPending) {
+    if (agentPending.length >= maxPending) {
       return {
         ok: false,
-        error: `You have ${pending.length} pending expert requests. Wait for completion or cancel existing requests.`,
+        error: `You have ${agentPending.length} pending expert requests. Wait for completion or cancel existing requests.`,
         t: Date.now(),
       };
     }
+
+    // Get global queue size for reporting
+    const allRequests = state.getExpertRequests();
+    const globalPending = allRequests.filter(
+      (r) => r.status === 'pending' || r.status === 'queued' || r.status === 'in_progress',
+    );
 
     // Create request
     const request = state.createExpertRequest({
@@ -86,7 +92,7 @@ export async function handleExpertRequest(
         message: 'Expert request queued. You will receive answer via message when complete.',
         hint: 'Check status with expert.status or pull messages with m.pull',
         estimatedTime: '10-20 minutes',
-        queuePosition: pending.length + 1,
+        queuePosition: globalPending.length + 1,
       },
       t: Date.now(),
     };

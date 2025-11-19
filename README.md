@@ -154,6 +154,7 @@ How agents interact with AgentHub:
 4.  **Execution**: Agent performs the work.
 5.  **Completion**: Agent closes the intent.
     - `i.close(id, status='ok')`
+    - *Note:* If mode was 'W' (Write), a code review job is automatically created.
 6.  **Review**: Agent requests a review from a human or another agent.
     - `review.request(scope=['src/feature/*.ts'])`
 

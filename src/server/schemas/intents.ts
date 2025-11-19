@@ -91,8 +91,10 @@ export type IntentOpenPayload = z.output<typeof IntentOpenSchema>;
 
 /** Raw schema - accepts variants */
 const IntentCloseRawSchema = z.object({
-  // ID field (no variants)
+  // ID variants: id, intentId, intent
   id: z.string().optional(),
+  intentId: z.string().optional(),
+  intent: z.string().optional(),
 
   // Status variants: status, s
   status: CloseStatusSchema.optional(),
@@ -117,7 +119,7 @@ const IntentCloseRawSchema = z.object({
  */
 export const IntentCloseSchema = IntentCloseRawSchema.transform((raw) => {
   // Normalize variants
-  const { id } = raw;
+  const id = raw.id ?? raw.intentId ?? raw.intent;
   const status = raw.status ?? raw.s;
   const note = raw.note ?? raw.n;
 
@@ -150,8 +152,10 @@ export type IntentClosePayload = z.output<typeof IntentCloseSchema>;
 
 /** Raw schema - accepts variants */
 const IntentRenewRawSchema = z.object({
-  // ID field (no variants)
+  // ID variants: id, intentId, intent
   id: z.string().optional(),
+  intentId: z.string().optional(),
+  intent: z.string().optional(),
 
   // TTL variants: ttlMs, ttl
   ttlMs: z.number().optional(),
@@ -166,7 +170,7 @@ const IntentRenewRawSchema = z.object({
  */
 export const IntentRenewSchema = IntentRenewRawSchema.transform((raw) => {
   // Normalize variants
-  const { id } = raw;
+  const id = raw.id ?? raw.intentId ?? raw.intent;
   const ttlMs = raw.ttlMs ?? raw.ttl;
 
   // Validate required fields
@@ -194,16 +198,19 @@ export type IntentRenewPayload = z.output<typeof IntentRenewSchema>;
 
 /** Raw schema - accepts variants */
 const IntentVoteRawSchema = z.object({
-  // ID field (no variants)
+  // ID variants: id, intentId, intent
   id: z.string().optional(),
+  intentId: z.string().optional(),
+  intent: z.string().optional(),
 
   // Agent variants: agent (canonical), from (alias)
   agent: z.string().optional(),
   from: z.string().optional(),
 
   // Vote variants: vote, v
-  vote: VoteSchema.optional(),
-  v: VoteSchema.optional(),
+  // Allow string for alias normalization (approve->ack, defer->nack)
+  vote: z.string().optional(),
+  v: z.string().optional(),
 
   // Reason variants: reason, r
   reason: z.string().optional(),
@@ -222,18 +229,25 @@ const IntentVoteRawSchema = z.object({
  */
 export const IntentVoteSchema = IntentVoteRawSchema.transform((raw) => {
   // Normalize variants
-  const { id } = raw;
+  const id = raw.id ?? raw.intentId ?? raw.intent;
   const agent = raw.agent ?? raw.from;
-  const vote = raw.vote ?? raw.v;
   const reason = raw.reason ?? raw.r;
+
+  // Normalize vote aliases
+  let voteStr = raw.vote ?? raw.v;
+  if (voteStr === 'approve') voteStr = 'ack';
+  if (voteStr === 'defer') voteStr = 'nack';
 
   // Validate required fields
   if (id === undefined) {
     throw new Error('id required. Provide the intent ID to vote on.');
   }
-  if (vote === undefined) {
-    throw new Error('vote required. Valid values: ack, nack');
+  if (voteStr === undefined) {
+    throw new Error('vote required. Valid values: ack (approve), nack (defer)');
   }
+
+  // Validate vote enum
+  const vote = VoteSchema.parse(voteStr);
 
   return {
     id,

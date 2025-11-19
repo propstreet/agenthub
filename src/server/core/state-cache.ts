@@ -716,9 +716,50 @@ export class StateCache {
   // =========================================================================
 
   /**
-   * Get complete state snapshot (for s.get and state://live)
+   * Get state snapshot (for s.get and state://live)
+   * Supports filtering to reduce verbosity
    */
-  getSnapshot(since?: number): StateSnapshot {
+  getSnapshot(options?: { since?: number; filter?: string }): Partial<StateSnapshot> {
+    const { since, filter } = options ?? {};
+    const ts = Date.now();
+
+    // If strict filter is applied, return only that component
+    if (filter !== undefined && filter !== 'all') {
+      const partial: Partial<StateSnapshot> = { ts };
+      switch (filter) {
+        case 'agents':
+          partial.agents = this.getAllAgents();
+          break;
+        case 'intents':
+          partial.intents = this.getAllIntents();
+          break;
+        case 'leases':
+          partial.leases = this.getActiveLeases(); // Only active leases for filtered view?
+          break;
+        case 'reviews':
+        case 'reviewJobs':
+          partial.reviewJobs = this.getAllReviewJobs();
+          break;
+        case 'expert':
+        case 'expertRequests':
+          partial.expertRequests = this.getExpertRequests();
+          break;
+        case 'messages':
+          partial.recentMessages = this.bus.getAllMessages(50);
+          break;
+        case 'events':
+          partial.recentEvents = this.bus.getEvents(since, 100);
+          break;
+        case 'config':
+          partial.config = {
+            ...(this.config.persistence !== undefined && { persistence: this.config.persistence }),
+          };
+          break;
+      }
+      return partial;
+    }
+
+    // Return full snapshot
     return {
       agents: this.getAllAgents(),
       intents: this.getAllIntents(),
@@ -732,7 +773,7 @@ export class StateCache {
         ...(this.config.persistence !== undefined && { persistence: this.config.persistence }),
       },
       expertAvailable: this.config.azureOpenAI !== undefined,
-      ts: Date.now(),
+      ts,
     };
   }
 

@@ -116,23 +116,23 @@ export async function handleHelp(): Promise<HubOpResponse> {
           description: 'Agent voting (auto-filled from session)',
         },
         {
-          name: 'intentId',
+          name: 'id',
           type: 'string',
           required: true,
-          variants: ['id', 'intent'],
+          variants: ['id', 'intentId', 'intent'],
           description: 'ID of intent to vote on',
         },
         {
           name: 'vote',
-          type: 'approve | defer',
+          type: 'ack | nack',
           required: true,
-          variants: ['v'],
-          description: 'Vote: approve=allow, defer=wait',
+          variants: ['v', 'vote'],
+          description: 'Vote decision: ack (approve) or nack (defer)',
         },
       ],
       example: {
-        intentId: 'intent_abc123',
-        vote: 'approve',
+        id: 'intent_abc123',
+        vote: 'ack',
       },
     },
     {
@@ -146,10 +146,10 @@ export async function handleHelp(): Promise<HubOpResponse> {
           description: 'Agent renewing (auto-filled from session)',
         },
         {
-          name: 'intentId',
+          name: 'id',
           type: 'string',
           required: true,
-          variants: ['id', 'intent'],
+          variants: ['id', 'intentId', 'intent'],
           description: 'ID of intent to renew',
         },
         {
@@ -162,25 +162,19 @@ export async function handleHelp(): Promise<HubOpResponse> {
         },
       ],
       example: {
-        intentId: 'intent_abc123',
+        id: 'intent_abc123',
         ttlMs: 180000,
       },
     },
     {
       op: 'i.close',
-      description: 'Close an intent after work is complete',
+      description: 'Close an intent. If mode was "W", a review job is automatically created.',
       fields: [
-        {
-          name: 'agent',
-          type: 'string',
-          required: false,
-          description: 'Agent closing intent (auto-filled from session)',
-        },
         {
           name: 'id',
           type: 'string',
           required: true,
-          variants: ['intentId', 'intent'],
+          variants: ['id', 'intentId', 'intent'],
           description: 'ID of intent to close',
         },
         {
@@ -290,7 +284,7 @@ export async function handleHelp(): Promise<HubOpResponse> {
     },
     {
       op: 'm.pull',
-      description: 'Pull messages from inbox',
+      description: 'Pull messages from inbox (defaults to unread)',
       fields: [
         {
           name: 'agent',
@@ -303,7 +297,7 @@ export async function handleHelp(): Promise<HubOpResponse> {
           type: 'number',
           required: false,
           variants: ['after', 'from'],
-          description: 'Unix timestamp - only get messages after this time',
+          description: 'Unix timestamp (0 = all history). Defaults to last pull time.',
         },
         {
           name: 'limit',

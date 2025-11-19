@@ -368,7 +368,7 @@ export class ExpertWorker {
       to: req.requestedBy,
       type: 'expert.completed',
       topic: 'expert',
-      text: `[Expert Response]\n\nQuestion: ${req.question}\n\n${result}`,
+      text: `Expert request ${req.id} completed.`,
       data: {
         requestId: req.id,
         question: req.question,
