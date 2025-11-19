@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 import { Dashboard } from './Dashboard.js';
-import type { HubState } from './types.js';
+import type { HubState, DashboardProps } from './types.js';
 
 describe('Dashboard', () => {
   const mockState: HubState = {
@@ -39,6 +39,7 @@ describe('Dashboard', () => {
     ],
     leases: [],
     reviewJobs: [],
+    expertRequests: [],
     recentMessages: [],
     recentEvents: [
       {
@@ -59,25 +60,42 @@ describe('Dashboard', () => {
     ts: Date.now(),
   };
 
-  const mockProps = {
+  const emptyState: HubState = {
+    agents: [],
+    intents: [],
+    leases: [],
+    reviewJobs: [],
+    expertRequests: [],
+    recentMessages: [],
+    recentEvents: [],
+    semaphores: {},
+    ts: Date.now(),
+  };
+
+  const mockProps: DashboardProps = {
     state: mockState,
     paused: false,
     onTogglePause: () => undefined,
     onRefresh: () => undefined,
+    persistenceEnabled: false,
+    expertEnabled: false,
   };
 
   it('renders dashboard header', () => {
     const { lastFrame } = render(<Dashboard {...mockProps} />);
 
     // BigText renders "AgentHub" as ASCII art, check for the Dashboard title instead
-    expect(lastFrame()).toContain('Multi-Agent Coordination Dashboard');
+    // Text is split across lines in v2 layout
+    expect(lastFrame()).toContain('Multi-Agent Coordination');
+    expect(lastFrame()).toContain('Dashboard');
     expect(lastFrame()).toContain('🤖');
   });
 
   it('displays agent count', () => {
     const { lastFrame } = render(<Dashboard {...mockProps} />);
 
-    expect(lastFrame()).toContain('Active Agents (2)');
+    // v2 Layout: "Active Agents (2 active, 0 stale)"
+    expect(lastFrame()).toContain('Active Agents (2 active');
     expect(lastFrame()).toContain('agent-1');
     expect(lastFrame()).toContain('agent-2');
   });
@@ -109,25 +127,16 @@ describe('Dashboard', () => {
   });
 
   it('handles empty state', () => {
-    const emptyState: HubState = {
-      agents: [],
-      intents: [],
-      leases: [],
-      reviewJobs: [],
-      recentMessages: [],
-      recentEvents: [],
-      semaphores: {},
-      ts: Date.now(),
-    };
-
-    const emptyProps = {
+    const localEmptyProps: DashboardProps = {
       state: emptyState,
       paused: false,
       onTogglePause: () => undefined,
       onRefresh: () => undefined,
+      persistenceEnabled: false,
+      expertEnabled: false,
     };
 
-    const { lastFrame } = render(<Dashboard {...emptyProps} />);
+    const { lastFrame } = render(<Dashboard {...localEmptyProps} />);
 
     expect(lastFrame()).toContain('No agents connected');
     expect(lastFrame()).toContain('No active intents');
@@ -157,11 +166,16 @@ describe('Dashboard', () => {
       ],
     };
 
-    const updatedProps = { ...mockProps, state: updatedState };
+    const updatedProps: DashboardProps = {
+      ...mockProps,
+      state: updatedState,
+      persistenceEnabled: false,
+    };
     rerender(<Dashboard {...updatedProps} />);
 
     expect(lastFrame()).toContain('Active Intents (2)');
-    expect(lastFrame()).toContain('i_def456');
+    // ID is truncated in v2 layout (i_def456 -> i_def4...)
+    expect(lastFrame()).toContain('i_def4');
   });
 
   it('displays agent status correctly', () => {
@@ -190,9 +204,10 @@ describe('Dashboard', () => {
       ],
     };
 
-    const conflictProps = {
+    const conflictProps: DashboardProps = {
       ...mockProps,
       state: stateWithConflict,
+      persistenceEnabled: false,
     };
 
     const { lastFrame } = render(<Dashboard {...conflictProps} />);

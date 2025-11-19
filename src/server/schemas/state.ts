@@ -18,6 +18,8 @@ import { z } from 'zod';
 const StateGetRawSchema = z.object({
   // Since timestamp (optional)
   since: z.number().optional(),
+  // Filter (optional)
+  filter: z.string().optional(),
 });
 
 /**
@@ -25,9 +27,9 @@ const StateGetRawSchema = z.object({
  * All fields are optional, so this is essentially a passthrough with validation
  */
 export const StateGetSchema = StateGetRawSchema.transform((raw) => {
-  // Since is optional, pass through
   return {
     ...(raw.since !== undefined && { since: raw.since }),
+    ...(raw.filter !== undefined && { filter: raw.filter }),
   };
 });
 

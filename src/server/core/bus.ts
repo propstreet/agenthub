@@ -6,6 +6,7 @@
 import { nanoid } from 'nanoid';
 import type { Msg, Event, MessagePullPayload, ServerConfig } from '../types/models.js';
 import type { ResolvedMessageSendPayload } from '../types/payloads.js';
+import { logger } from './logger.js';
 
 export class MessageBus {
   private messages: Msg[] = [];
@@ -53,12 +54,48 @@ export class MessageBus {
    * Pull messages for a specific agent
    */
   pull(payload: MessagePullPayload): Msg[] {
-    const { agent, since = 0, limit = 50 } = payload;
+    const { agent, since = 0, limit = 50, type, types, topic, includeSelf = false } = payload;
 
-    // Filter messages for this agent (direct or broadcast)
-    const filtered = this.messages.filter(
-      (msg) => msg.ts > since && (msg.to === agent || msg.to === undefined || msg.from === agent),
-    );
+    // Filter messages
+    const filtered = this.messages.filter((msg) => {
+      // 1. Time filter
+      if (msg.ts <= since) {
+        return false;
+      }
+
+      // 2. Ownership / Visibility
+      // - To me (Direct)
+      // - Broadcast (To undefined)
+      // - From me (Sent) -> Exclude unless it is also To me (Self-DM)
+      const isToMe = msg.to === agent;
+      const isBroadcast = msg.to === undefined;
+      const isFromMe = msg.from === agent;
+
+      if (!isToMe && !isBroadcast) {
+        return false;
+      }
+
+      // Filter self-broadcasts (unless includeSelf is true)
+      if (isBroadcast && isFromMe && !includeSelf) {
+        return false;
+      }
+
+      // 3. Type filtering
+      if (type !== undefined && msg.type !== type) {
+        return false;
+      }
+
+      if (types !== undefined && !types.includes(msg.type)) {
+        return false;
+      }
+
+      // 4. Topic filtering
+      if (topic !== undefined && msg.topic !== topic) {
+        return false;
+      }
+
+      return true;
+    });
 
     // Sort by timestamp (newest first) and limit
     return filtered.sort((a, b) => b.ts - a.ts).slice(0, limit);
@@ -87,7 +124,7 @@ export class MessageBus {
         try {
           listener(event);
         } catch (error) {
-          console.error(`Event listener error for ${event.type}:`, error);
+          logger.error({ err: error, eventType: event.type }, 'Event listener error');
         }
       }
     }
@@ -99,7 +136,7 @@ export class MessageBus {
         try {
           listener(event);
         } catch (error) {
-          console.error('Event listener error (wildcard):', error);
+          logger.error({ err: error, eventType: '*' }, 'Event listener error (wildcard)');
         }
       }
     }

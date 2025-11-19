@@ -7,7 +7,12 @@ import type { HubOpResponse } from '../types/models.js';
 import type { MessageBus } from '../core/bus.js';
 import type { StateCache } from '../core/state-cache.js';
 import { getCurrentSessionId } from '../session-context.js';
-import { ReviewRequestSchema, ReviewClaimSchema, ReviewCompleteSchema } from '../schemas/review.js';
+import {
+  ReviewRequestSchema,
+  ReviewClaimSchema,
+  ReviewCompleteSchema,
+  ReviewListSchema,
+} from '../schemas/review.js';
 
 export async function handleReviewRequest(
   bus: MessageBus,
@@ -142,6 +147,8 @@ export async function handleReviewClaim(
     state.updateReviewJob(data.jobId, {
       claimedBy: agentName,
       status: 'claimed',
+      claimedAt: Date.now(),
+      claimExpiresAt: Date.now() + 15 * 60 * 1000, // 15 minutes
     });
 
     // Emit review event
@@ -279,6 +286,70 @@ export async function handleReviewComplete(
         severity: data.severity,
         notes: data.notes,
         ...(data.patch !== undefined && { patch: data.patch }),
+      },
+      t: Date.now(),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      t: Date.now(),
+    };
+  }
+}
+
+export async function handleReviewList(
+  state: StateCache,
+  payload: unknown,
+): Promise<HubOpResponse> {
+  try {
+    // Parse and normalize payload
+    const data = ReviewListSchema.parse(payload);
+
+    // Resolve agent from session
+    const sessionId = getCurrentSessionId();
+    const agentName = sessionId !== undefined ? state.getAgentForSession(sessionId) : undefined;
+
+    // Get all review jobs
+    let jobs = state.getAllReviewJobs();
+
+    // Filter by status
+    if (data.status !== undefined) {
+      jobs = jobs.filter((j) => j.status === data.status);
+    }
+
+    // Filter by "mine" (claimed by me)
+    if (data.mine === true) {
+      if (agentName === undefined) {
+        throw new Error('Agent context required for mine=true. Register with a.register first.');
+      }
+      jobs = jobs.filter((j) => j.claimedBy === agentName);
+    }
+
+    // Filter by "unclaimedOnly"
+    if (data.unclaimedOnly === true) {
+      jobs = jobs.filter((j) => j.status === 'pending');
+    }
+
+    // Filter by since
+    const { since } = data;
+    if (since !== undefined) {
+      jobs = jobs.filter((j) => j.createdAt >= since);
+    }
+
+    // Sort by createdAt desc (newest first)
+    jobs.sort((a, b) => b.createdAt - a.createdAt);
+
+    // Limit
+    const total = jobs.length;
+    jobs = jobs.slice(0, data.limit);
+
+    return {
+      ok: true,
+      d: {
+        jobs,
+        total,
+        limit: data.limit,
       },
       t: Date.now(),
     };

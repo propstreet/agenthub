@@ -13,7 +13,8 @@
 import OpenAI from 'openai';
 import { readFileSync, existsSync } from 'fs';
 import { extname, basename, resolve } from 'path';
-import type { ExpertAskPayload, ServerConfig } from '../types/models.js';
+import type { ExpertRequestPayload, ServerConfig } from '../types/models.js';
+import { logger } from './logger.js';
 
 export class ExpertBridge {
   private client: OpenAI | null = null;
@@ -30,7 +31,7 @@ export class ExpertBridge {
    */
   private initialize(): void {
     if (this.config.azureOpenAI === undefined) {
-      console.warn(
+      logger.warn(
         '[ExpertBridge] Azure OpenAI not configured - expert escalation will be disabled',
       );
       return;
@@ -50,12 +51,12 @@ export class ExpertBridge {
           },
         });
 
-        console.log(`[ExpertBridge] Initialized with API key authentication (v1 endpoint)`);
+        logger.info('[ExpertBridge] Initialized with API key authentication (v1 endpoint)');
       } else {
         // Entra ID (Azure AD) authentication
         // Note: v1 endpoint with Entra ID not yet supported
-        // Recommend using API key for expert.ask
-        console.warn(
+        // Recommend using API key for expert.request
+        logger.warn(
           '[ExpertBridge] Entra ID authentication not supported for v1 endpoint yet. Please use AZURE_OPENAI_API_KEY.',
         );
         this.isConfigured = false;
@@ -64,7 +65,7 @@ export class ExpertBridge {
 
       this.isConfigured = true;
     } catch (error) {
-      console.error('[ExpertBridge] Initialization failed:', error);
+      logger.error({ err: error }, '[ExpertBridge] Initialization failed');
       this.isConfigured = false;
     }
   }
@@ -114,7 +115,7 @@ export class ExpertBridge {
       const absolutePath = resolve(filePath);
 
       if (!existsSync(absolutePath)) {
-        console.warn(`[ExpertBridge] File not found: ${absolutePath}`);
+        logger.warn({ filePath }, '[ExpertBridge] File not found');
         return null;
       }
 
@@ -123,7 +124,7 @@ export class ExpertBridge {
 
       return `# File: ${filePath}\n\`\`\`${language}\n${content}\n\`\`\``;
     } catch (error) {
-      console.error(`[ExpertBridge] Error reading file ${filePath}:`, error);
+      logger.error({ err: error, filePath }, '[ExpertBridge] Error reading file');
       return null;
     }
   }
@@ -140,7 +141,7 @@ export class ExpertBridge {
       const absolutePath = resolve(filePath);
 
       if (!existsSync(absolutePath)) {
-        console.warn(`[ExpertBridge] File not found: ${absolutePath}`);
+        logger.warn({ filePath }, '[ExpertBridge] File not found');
         return null;
       }
 
@@ -153,20 +154,98 @@ export class ExpertBridge {
         file_data: `data:application/pdf;base64,${base64}`,
       };
     } catch (error) {
-      console.error(`[ExpertBridge] Error reading PDF ${filePath}:`, error);
+      logger.error({ err: error, filePath }, '[ExpertBridge] Error reading PDF');
       return null;
     }
   }
 
   /**
-   * Ask the expert for help using Responses API
-   *
-   * Follows proven GPT-5-Pro consultation pattern (claude-powerpack:ask-expert):
-   * 1. Question + code context formatted as markdown (input_text)
-   * 2. PDF files only as attachments (input_file with base64)
-   * 3. Guidance request in instructions
+   * Build content array from prompt and files
+   * Extracted for reuse between sync and async methods
    */
-  async ask(payload: ExpertAskPayload): Promise<string> {
+  private buildContent(
+    prompt: string,
+    files: string[],
+  ): (
+    | { type: 'input_text'; text: string }
+    | { type: 'input_file'; filename: string; file_data: string }
+  )[] {
+    // Separate PDFs from code files
+    const pdfFiles: string[] = [];
+    const codeFiles: string[] = [];
+
+    for (const file of files) {
+      if (this.isPDF(file)) {
+        pdfFiles.push(file);
+      } else {
+        codeFiles.push(file);
+      }
+    }
+
+    // Build input_text: prompt + code files as markdown
+    const textParts: string[] = [prompt];
+
+    let codeFilesIncluded = 0;
+    for (const file of codeFiles) {
+      const formatted = this.formatCodeAsMarkdown(file);
+      if (formatted !== null) {
+        textParts.push(`\n\n${formatted}`);
+        codeFilesIncluded++;
+      }
+    }
+
+    if (codeFiles.length > 0) {
+      logger.debug(
+        { included: codeFilesIncluded, total: codeFiles.length },
+        '[ExpertBridge] Included code files',
+      );
+    }
+
+    const inputText = textParts.join('');
+
+    // Build content array: text + PDF attachments
+    const content: (
+      | { type: 'input_text'; text: string }
+      | { type: 'input_file'; filename: string; file_data: string }
+    )[] = [
+      {
+        type: 'input_text',
+        text: inputText,
+      },
+    ];
+
+    // Add PDF files as base64 attachments
+    let pdfsAttached = 0;
+    for (const file of pdfFiles) {
+      const fileData = this.readPDFAsBase64DataURL(file);
+      if (fileData !== null) {
+        content.push({
+          type: 'input_file',
+          filename: fileData.filename,
+          file_data: fileData.file_data,
+        });
+        pdfsAttached++;
+      }
+    }
+
+    if (pdfsAttached > 0) {
+      logger.debug(
+        { attached: pdfsAttached, total: pdfFiles.length },
+        '[ExpertBridge] Attached PDF files',
+      );
+    }
+
+    return content;
+  }
+
+  /**
+   * Submit expert request in background mode
+   * Returns immediately with responseId for polling
+   */
+  async askBackground(payload: ExpertRequestPayload): Promise<{
+    responseId: string;
+    status: string;
+  }> {
     if (!this.isConfigured || this.client === null) {
       throw new Error('Azure OpenAI expert bridge is not configured');
     }
@@ -175,75 +254,31 @@ export class ExpertBridge {
       throw new Error('Azure OpenAI configuration missing');
     }
 
-    const { prompt, files, effort = 'high', verb = 'low' } = payload;
+    const { question, paths, previousResponseId } = payload;
+
+    // Use system config for model parameters
+    const effort = this.config.azureOpenAI.effort ?? 'high';
+    const verb = this.config.azureOpenAI.verbosity ?? 'low';
 
     try {
-      console.log(`[ExpertBridge] Asking expert: ${prompt.slice(0, 100)}...`);
-      console.log(`[ExpertBridge] Analyzing ${files.length} file(s)`);
+      logger.info(
+        { promptSnippet: question.slice(0, 100), fileCount: paths.length },
+        '[ExpertBridge] Creating background job',
+      );
 
-      // Separate PDFs from code files
-      const pdfFiles: string[] = [];
-      const codeFiles: string[] = [];
+      // Build content using extracted method
+      const content = this.buildContent(question, paths);
 
-      for (const file of files) {
-        if (this.isPDF(file)) {
-          pdfFiles.push(file);
-        } else {
-          codeFiles.push(file);
-        }
+      // Log if this is a follow-up question
+      if (previousResponseId !== undefined && previousResponseId.length > 0) {
+        logger.info({ previousResponseId }, '[ExpertBridge] Follow-up request');
       }
 
-      // Build input_text: prompt + code files as markdown
-      // Each file gets its own heading (# File: {path}) - no generic section header needed
-      const textParts: string[] = [prompt];
-
-      if (codeFiles.length > 0) {
-        let codeFilesIncluded = 0;
-
-        for (const file of codeFiles) {
-          const formatted = this.formatCodeAsMarkdown(file);
-          if (formatted !== null) {
-            textParts.push(`\n\n${formatted}`);
-            codeFilesIncluded++;
-          }
-        }
-
-        console.log(`[ExpertBridge] Included ${codeFilesIncluded}/${codeFiles.length} code files`);
-      }
-
-      const inputText = textParts.join('');
-
-      // Build content array: text + PDF attachments
-      const content: (
-        | { type: 'input_text'; text: string }
-        | { type: 'input_file'; filename: string; file_data: string }
-      )[] = [
-        {
-          type: 'input_text',
-          text: inputText,
-        },
-      ];
-
-      // Add PDF files as base64 attachments
-      let pdfsAttached = 0;
-      for (const file of pdfFiles) {
-        const fileData = this.readPDFAsBase64DataURL(file);
-        if (fileData !== null) {
-          content.push({
-            type: 'input_file',
-            filename: fileData.filename,
-            file_data: fileData.file_data,
-          });
-          pdfsAttached++;
-        }
-      }
-
-      if (pdfsAttached > 0) {
-        console.log(`[ExpertBridge] Attached ${pdfsAttached}/${pdfFiles.length} PDF files`);
-      }
-
-      // Use correct Responses API structure
-      const response = await this.client.responses.create({
+      // Create background job
+      // Note: Using Record<string, unknown> type due to TypeScript issue with previous_response_id
+      // See: https://github.com/openai/openai-node/issues/1547
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const params: Record<string, any> = {
         model: this.config.azureOpenAI.deployment,
         input: [
           {
@@ -255,23 +290,141 @@ export class ExpertBridge {
           'You are a code architecture expert. Analyze the code and question, then provide specific, actionable recommendations. Be concise and focus on the most important issues. Use markdown formatting for code snippets.',
         text: { verbosity: verb },
         reasoning: { effort },
-        max_output_tokens: 4000,
-      });
+        background: true, // Background mode!
+        store: true, // Required for context retention (24h)
+        // No max_output_tokens - let model decide
+        // No stream - polling mode
+      };
 
-      // Extract clean text output
-      const output = response.output_text;
-
-      console.log(`[ExpertBridge] Expert response received (${output.length} chars)`);
-
-      return output;
-    } catch (error) {
-      console.error('[ExpertBridge] Expert ask failed:', error);
-
-      if (error instanceof Error) {
-        throw new Error(`Expert escalation failed: ${error.message}`);
+      // Add previous_response_id for follow-up questions
+      if (previousResponseId !== undefined && previousResponseId.length > 0) {
+        params['previous_response_id'] = previousResponseId;
       }
 
-      throw new Error('Expert escalation failed: unknown error');
+      const response = await this.client.responses.create(params);
+
+      logger.info(
+        { responseId: response.id, status: response.status },
+        '[ExpertBridge] Background job created',
+      );
+
+      return {
+        responseId: response.id,
+        status: response.status ?? 'unknown',
+      };
+    } catch (error) {
+      logger.error({ err: error }, '[ExpertBridge] Background job creation failed');
+
+      if (error instanceof Error) {
+        throw new Error(`Expert background job failed: ${error.message}`);
+      }
+
+      throw new Error('Expert background job failed: unknown error');
+    }
+  }
+
+  /**
+   * Retrieve job status from Azure
+   */
+  async retrieve(responseId: string): Promise<{
+    status: string;
+    output_text: string;
+    usage?: {
+      input_tokens: number;
+      output_tokens: number;
+      reasoning_tokens?: number;
+    };
+    incomplete_details?: {
+      reason: string;
+    };
+  }> {
+    if (!this.isConfigured || this.client === null) {
+      throw new Error('Azure OpenAI expert bridge is not configured');
+    }
+
+    const response = await this.client.responses.retrieve(responseId);
+
+    // Build result object with proper optional handling
+    const result: {
+      status: string;
+      output_text: string;
+      usage?: {
+        input_tokens: number;
+        output_tokens: number;
+        reasoning_tokens?: number;
+      };
+      incomplete_details?: {
+        reason: string;
+      };
+    } = {
+      status: response.status ?? 'unknown',
+      output_text: response.output_text,
+    };
+
+    // Add usage if present
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (response.usage !== null && response.usage !== undefined) {
+      const usageData: {
+        input_tokens: number;
+        output_tokens: number;
+        reasoning_tokens?: number;
+      } = {
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+      };
+
+      // Only add reasoning_tokens if it exists and is a number
+      // Using type assertion since SDK doesn't include reasoning_tokens yet
+      const responseUsage = response.usage as {
+        input_tokens: number;
+        output_tokens: number;
+        reasoning_tokens?: number;
+      };
+      if (responseUsage.reasoning_tokens !== undefined && responseUsage.reasoning_tokens !== 0) {
+        usageData.reasoning_tokens = responseUsage.reasoning_tokens;
+      }
+
+      result.usage = usageData;
+    }
+
+    // Add incomplete_details if present
+    // Note: response.incomplete_details is typed as nullable in SDK
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (response.incomplete_details !== null && response.incomplete_details !== undefined) {
+      result.incomplete_details = {
+        reason: response.incomplete_details.reason ?? 'unknown',
+      };
+    }
+
+    return result;
+  }
+
+  /**
+   * Cancel background job
+   */
+  async cancel(responseId: string): Promise<void> {
+    if (!this.isConfigured || this.client === null) {
+      throw new Error('Azure OpenAI expert bridge is not configured');
+    }
+
+    await this.client.responses.cancel(responseId);
+    logger.info({ responseId }, '[ExpertBridge] Cancelled job');
+  }
+
+  /**
+   * Delete background job (cleanup)
+   */
+  async delete(responseId: string): Promise<void> {
+    if (!this.isConfigured || this.client === null) {
+      throw new Error('Azure OpenAI expert bridge is not configured');
+    }
+
+    try {
+      await this.client.responses.delete(responseId);
+      logger.debug({ responseId }, '[ExpertBridge] Deleted job');
+    } catch {
+      // Ignore errors (job might already be deleted)
+      logger.debug({ responseId }, '[ExpertBridge] Delete job failed (may not exist)');
     }
   }
 

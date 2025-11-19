@@ -71,10 +71,15 @@ export async function handleAgentRegister(
     // Get session ID from request context
     const sessionId = getCurrentSessionId();
 
-    // Generate funny name if not provided
-    // If name is provided, registerAgent will update existing agent (idempotent)
-    // If no name provided, generate random one (always creates new agent)
-    const agentName = data.name ?? generateFunnyName();
+    // Check if session is already bound to an agent
+    const boundAgentName =
+      sessionId !== undefined ? state.getAgentForSession(sessionId) : undefined;
+
+    // Determine agent name:
+    // 1. Explicitly provided in payload
+    // 2. Or existing bound agent name (implicit)
+    // 3. Or generate a new funny name
+    const agentName = data.name ?? boundAgentName ?? generateFunnyName();
 
     // Register agent with session binding (enforces one agent per session)
     const agent = state.registerAgent(agentName, data.role, data.version, sessionId);

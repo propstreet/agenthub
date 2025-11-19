@@ -8,16 +8,20 @@ import type {
   Intent,
   Lease,
   ReviewJob,
+  ExpertRequest,
   StateSnapshot,
   ServerConfig,
 } from '../types/models.js';
 import type { MessageBus } from './bus.js';
+import { nanoid } from 'nanoid';
+import { logger } from './logger.js';
 
 export class StateCache {
   private agents = new Map<string, Agent>();
   private intents = new Map<string, Intent>();
   private leases = new Map<string, Lease>();
   private reviewJobs = new Map<string, ReviewJob>();
+  private expertRequests = new Map<string, ExpertRequest>();
   private semaphores = new Map<string, number>();
   private bus: MessageBus;
   private config: ServerConfig;
@@ -53,11 +57,19 @@ export class StateCache {
       const existingAgentName = this.sessionToAgent.get(sessionId);
 
       if (existingAgentName !== undefined) {
-        // Session already has an agent - update role/version only
-        // Name is locked to maintain identity
+        // Session already has an agent - verify name matches if provided
+        if (name !== existingAgentName) {
+          throw new Error(
+            `Session already registered as agent "${existingAgentName}". ` +
+              `Agent names are immutable to maintain identity consistency. ` +
+              `You can update roles/version but cannot change the agent name.`,
+          );
+        }
+
+        // Update existing agent's role/version only
         const agent = this.agents.get(existingAgentName);
         if (agent === undefined) {
-          throw new Error(`Session agent ${existingAgentName} not found`);
+          throw new Error(`Session agent ${existingAgentName} not found in state`);
         }
 
         // Update role and version, refresh heartbeat
@@ -68,9 +80,7 @@ export class StateCache {
         agent.lastSeen = Date.now();
         agent.status = 'active';
 
-        console.log(
-          `[StateCache] Agent updated: ${existingAgentName} [${role.join(', ')}] (session locked)`,
-        );
+        logger.info({ agent: existingAgentName, role }, '[StateCache] Agent updated');
 
         return agent;
       }
@@ -104,9 +114,7 @@ export class StateCache {
     this.agents.set(name, agent);
 
     if (existing === undefined) {
-      const sessionNote =
-        sessionId !== undefined ? ` (session: ${sessionId.substring(0, 8)}...)` : '';
-      console.log(`[StateCache] Agent registered: ${name} [${role.join(', ')}]${sessionNote}`);
+      logger.info({ agent: name, role, sessionId }, '[StateCache] Agent registered');
     }
 
     return agent;
@@ -148,6 +156,48 @@ export class StateCache {
    * Remove agent and cleanup session binding
    */
   removeAgent(name: string): void {
+    // 1. Cleanup active intents owned by this agent
+    const intents = this.getIntentsByAgent(name);
+    for (const intent of intents) {
+      this.intents.delete(intent.id);
+      // Notify? Maybe not necessary if agent is gone
+    }
+
+    // 2. Cleanup leases owned by this agent
+    const leases = this.getLeasesByAgent(name);
+    for (const lease of leases) {
+      this.leases.delete(lease.id);
+    }
+
+    // 3. Cleanup expert requests owned by this agent
+    const expertReqs = this.getExpertRequestsForAgent(name);
+    for (const req of expertReqs) {
+      // We don't cancel at Azure here synchronously to avoid blocking,
+      // but ExpertWorker might eventually clean them up if we mark them or delete them.
+      // Deleting them from state is sufficient for now.
+      this.expertRequests.delete(req.id);
+    }
+
+    // 4. Cleanup review jobs originated by this agent (no one to review for)
+    // Only delete pending/claimed ones? Completed ones are history.
+    // Let's delete pending/claimed.
+    for (const [id, job] of this.reviewJobs) {
+      if (job.origin === name && (job.status === 'pending' || job.status === 'claimed')) {
+        this.reviewJobs.delete(id);
+      }
+    }
+
+    // 5. Unclaim review jobs claimed by this agent
+    for (const [id, job] of this.reviewJobs) {
+      if (job.claimedBy === name && job.status === 'claimed') {
+        job.status = 'pending';
+        delete job.claimedBy;
+        delete job.claimedAt;
+        delete job.claimExpiresAt;
+        logger.info({ jobId: id }, '[StateCache] Unclaimed review job due to reviewer removal');
+      }
+    }
+
     this.agents.delete(name);
 
     // Clean up session bindings
@@ -201,14 +251,137 @@ export class StateCache {
   cleanupSession(sessionId: string): void {
     const agentName = this.sessionToAgent.get(sessionId);
     if (agentName !== undefined) {
-      console.log(
-        `[StateCache] Cleaning up session ${sessionId.substring(0, 8)}... (agent: ${agentName})`,
+      logger.debug(
+        { sessionId: sessionId.substring(0, 8), agent: agentName },
+        '[StateCache] Cleaning up session',
       );
 
       this.agents.delete(agentName);
       this.sessionToAgent.delete(sessionId);
       this.agentToSession.delete(agentName);
     }
+  }
+
+  /**
+   * Purge disconnected agents older than threshold
+   */
+  purgeDisconnectedAgents(olderThanMs: number): void {
+    const now = Date.now();
+    const toRemove: string[] = [];
+
+    for (const [name, agent] of this.agents) {
+      if (agent.status === 'disconnected' && now - agent.lastSeen > olderThanMs) {
+        toRemove.push(name);
+      }
+    }
+
+    for (const name of toRemove) {
+      this.removeAgent(name);
+    }
+
+    if (toRemove.length > 0) {
+      logger.info({ purgedCount: toRemove.length }, '[StateCache] Purged disconnected agents');
+    }
+  }
+
+  /**
+   * Purge stale agents (idle or disconnected) older than threshold
+   */
+  purgeStaleAgents(olderThanMs: number = 24 * 60 * 60 * 1000): void {
+    const now = Date.now();
+    const toRemove: string[] = [];
+
+    for (const [name, agent] of this.agents) {
+      const isStale = agent.status === 'disconnected' || agent.status === 'idle';
+      if (isStale && now - agent.lastSeen > olderThanMs) {
+        toRemove.push(name);
+      }
+    }
+
+    for (const name of toRemove) {
+      this.removeAgent(name);
+    }
+
+    if (toRemove.length > 0) {
+      logger.info({ purgedCount: toRemove.length }, '[StateCache] Purged stale agents');
+    }
+  }
+
+  /**
+   * Cleanup old completed reviews
+   */
+  cleanupOldReviews(olderThanMs: number = 24 * 60 * 60 * 1000): number {
+    const now = Date.now();
+    let removed = 0;
+
+    for (const [id, job] of this.reviewJobs) {
+      const isDone = job.status === 'completed' || job.status === 'failed';
+      if (isDone && now - job.createdAt > olderThanMs) {
+        this.reviewJobs.delete(id);
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      logger.info({ removed }, '[StateCache] Cleaned up old review jobs');
+    }
+    return removed;
+  }
+
+  /**
+   * Cleanup orphaned artifacts (agents that no longer exist)
+   * This handles "zombie" data from before cascading cleanup was added
+   */
+  cleanupOrphanedArtifacts(): {
+    intents: number;
+    reviews: number;
+    expertRequests: number;
+    leases: number;
+  } {
+    const stats = {
+      intents: 0,
+      reviews: 0,
+      expertRequests: 0,
+      leases: 0,
+    };
+
+    // 1. Intents
+    for (const [id, intent] of this.intents) {
+      if (!this.agents.has(intent.agent)) {
+        this.intents.delete(id);
+        stats.intents++;
+      }
+    }
+
+    // 2. Reviews (orphaned origin)
+    for (const [id, job] of this.reviewJobs) {
+      if (!this.agents.has(job.origin)) {
+        this.reviewJobs.delete(id);
+        stats.reviews++;
+      }
+    }
+
+    // 3. Expert Requests
+    for (const [id, req] of this.expertRequests) {
+      if (!this.agents.has(req.requestedBy)) {
+        this.expertRequests.delete(id);
+        stats.expertRequests++;
+      }
+    }
+
+    // 4. Leases
+    for (const [id, lease] of this.leases) {
+      if (!this.agents.has(lease.agent)) {
+        this.leases.delete(id);
+        stats.leases++;
+      }
+    }
+
+    if (stats.intents > 0 || stats.reviews > 0 || stats.expertRequests > 0 || stats.leases > 0) {
+      logger.info(stats, '[StateCache] Cleaned up orphaned artifacts');
+    }
+
+    return stats;
   }
 
   // =========================================================================
@@ -404,6 +577,112 @@ export class StateCache {
     }
   }
 
+  /**
+   * Clean up expired review claims
+   */
+  cleanupExpiredClaims(): void {
+    const now = Date.now();
+    const expired: string[] = [];
+
+    for (const [id, job] of this.reviewJobs) {
+      if (
+        job.status === 'claimed' &&
+        job.claimExpiresAt !== undefined &&
+        job.claimExpiresAt < now
+      ) {
+        // Reset job to pending
+        job.status = 'pending';
+        delete job.claimedBy;
+        delete job.claimedAt;
+        delete job.claimExpiresAt;
+        expired.push(id);
+
+        // Notify origin that claim expired? Maybe broadcast again?
+        // For now just log it.
+        logger.info({ jobId: id }, '[StateCache] Claim expired for review job, reset to pending');
+      }
+    }
+  }
+
+  // =========================================================================
+  // Expert Request Management
+  // =========================================================================
+
+  /**
+   * Create expert request
+   */
+  createExpertRequest(
+    data: Omit<ExpertRequest, 'id' | 'createdAt' | 'status' | 'attempt'>,
+  ): ExpertRequest {
+    const request: ExpertRequest = {
+      ...data,
+      id: `exp_${nanoid(12)}`,
+      status: 'pending',
+      createdAt: Date.now(),
+      attempt: 0,
+    };
+
+    this.expertRequests.set(request.id, request);
+    logger.info({ requestId: request.id }, '[StateCache] Expert request created');
+    return request;
+  }
+
+  /**
+   * Get expert request by ID
+   */
+  getExpertRequest(id: string): ExpertRequest | undefined {
+    return this.expertRequests.get(id);
+  }
+
+  /**
+   * Get all expert requests
+   */
+  getExpertRequests(): ExpertRequest[] {
+    return Array.from(this.expertRequests.values());
+  }
+
+  /**
+   * Get expert requests for specific agent
+   */
+  getExpertRequestsForAgent(agent: string): ExpertRequest[] {
+    return Array.from(this.expertRequests.values()).filter((r) => r.requestedBy === agent);
+  }
+
+  /**
+   * Update expert request
+   */
+  updateExpertRequest(id: string, updates: Partial<ExpertRequest>): void {
+    const req = this.expertRequests.get(id);
+    if (req !== undefined) {
+      Object.assign(req, updates);
+    }
+  }
+
+  /**
+   * Delete expert request
+   */
+  deleteExpertRequest(id: string): void {
+    this.expertRequests.delete(id);
+  }
+
+  /**
+   * Cleanup old completed expert requests
+   */
+  cleanupExpertRequests(ttl: number): void {
+    const cutoff = Date.now() - ttl;
+
+    for (const [id, req] of this.expertRequests.entries()) {
+      if (
+        (req.status === 'completed' || req.status === 'failed' || req.status === 'incomplete') &&
+        req.completedAt !== undefined &&
+        req.completedAt < cutoff
+      ) {
+        this.expertRequests.delete(id);
+        logger.debug({ requestId: id }, '[StateCache] Cleaned up old expert request');
+      }
+    }
+  }
+
   // =========================================================================
   // Semaphores (generic counters)
   // =========================================================================
@@ -437,18 +716,64 @@ export class StateCache {
   // =========================================================================
 
   /**
-   * Get complete state snapshot (for s.get and state://live)
+   * Get state snapshot (for s.get and state://live)
+   * Supports filtering to reduce verbosity
    */
-  getSnapshot(since?: number): StateSnapshot {
+  getSnapshot(options?: { since?: number; filter?: string }): Partial<StateSnapshot> {
+    const { since, filter } = options ?? {};
+    const ts = Date.now();
+
+    // If strict filter is applied, return only that component
+    if (filter !== undefined && filter !== 'all') {
+      const partial: Partial<StateSnapshot> = { ts };
+      switch (filter) {
+        case 'agents':
+          partial.agents = this.getAllAgents();
+          break;
+        case 'intents':
+          partial.intents = this.getAllIntents();
+          break;
+        case 'leases':
+          partial.leases = this.getActiveLeases(); // Only active leases for filtered view?
+          break;
+        case 'reviews':
+        case 'reviewJobs':
+          partial.reviewJobs = this.getAllReviewJobs();
+          break;
+        case 'expert':
+        case 'expertRequests':
+          partial.expertRequests = this.getExpertRequests();
+          break;
+        case 'messages':
+          partial.recentMessages = this.bus.getAllMessages(50);
+          break;
+        case 'events':
+          partial.recentEvents = this.bus.getEvents(since, 100);
+          break;
+        case 'config':
+          partial.config = {
+            ...(this.config.persistence !== undefined && { persistence: this.config.persistence }),
+          };
+          break;
+      }
+      return partial;
+    }
+
+    // Return full snapshot
     return {
       agents: this.getAllAgents(),
       intents: this.getAllIntents(),
       leases: this.getActiveLeases(),
       reviewJobs: this.getAllReviewJobs(),
+      expertRequests: this.getExpertRequests(),
       recentMessages: this.bus.getAllMessages(50),
       recentEvents: this.bus.getEvents(since, 100),
       semaphores: Object.fromEntries(this.semaphores),
-      ts: Date.now(),
+      config: {
+        ...(this.config.persistence !== undefined && { persistence: this.config.persistence }),
+      },
+      expertAvailable: this.config.azureOpenAI !== undefined,
+      ts,
     };
   }
 
@@ -474,11 +799,36 @@ export class StateCache {
       }, 60_000),
     );
 
+    // Clean up expired review claims every 60 seconds
+    this.cleanupTimers.push(
+      setInterval(() => {
+        this.cleanupExpiredClaims();
+      }, 60_000),
+    );
+
     // Update agent status every 15 seconds
     this.cleanupTimers.push(
       setInterval(() => {
         this.updateAgentStatus();
       }, 15_000),
+    );
+
+    // Clean up old completed expert requests every 5 minutes
+    this.cleanupTimers.push(
+      setInterval(
+        () => {
+          const ttl = 24 * 60 * 60 * 1000; // 24 hours
+          this.cleanupExpertRequests(ttl);
+        },
+        5 * 60 * 1000,
+      ),
+    );
+
+    // Clean up stale agents every hour
+    this.cleanupTimers.push(
+      setInterval(() => {
+        this.purgeStaleAgents();
+      }, 3600000),
     );
   }
 
@@ -518,7 +868,7 @@ export class StateCache {
     }
 
     if (expired.length > 0) {
-      console.log(`[StateCache] Expired ${expired.length} intents`);
+      logger.debug({ expiredCount: expired.length }, '[StateCache] Expired intents');
     }
 
     // Remove ended intents older than 5 minutes
@@ -544,7 +894,7 @@ export class StateCache {
     }
 
     if (expired.length > 0) {
-      console.log(`[StateCache] Expired ${expired.length} leases`);
+      logger.debug({ expiredCount: expired.length }, '[StateCache] Expired leases');
     }
   }
 
@@ -617,6 +967,7 @@ export class StateCache {
     this.intents.clear();
     this.leases.clear();
     this.reviewJobs.clear();
+    this.expertRequests.clear();
     this.semaphores.clear();
   }
 
@@ -662,6 +1013,11 @@ export class StateCache {
       this.reviewJobs.set(job.id, job);
     });
 
+    // Restore expert requests (if available in snapshot)
+    snapshot.expertRequests.forEach((req) => {
+      this.expertRequests.set(req.id, req);
+    });
+
     // Restore semaphores if present
     if (snapshot.semaphores !== undefined) {
       Object.entries(snapshot.semaphores).forEach(([key, value]) => {
@@ -673,9 +1029,33 @@ export class StateCache {
     this.sessionToAgent.clear();
     this.agentToSession.clear();
 
-    console.log(
-      `[StateCache] Restored from snapshot: ${this.agents.size} agents, ${this.intents.size}/${snapshot.intents.length} intents (${snapshot.intents.length - this.intents.size} expired), ${this.leases.size}/${snapshot.leases.length} leases (${snapshot.leases.length - this.leases.size} expired), ${this.reviewJobs.size} reviews`,
+    logger.info(
+      {
+        agents: this.agents.size,
+        intents: this.intents.size,
+        totalIntents: snapshot.intents.length,
+        expiredIntents: snapshot.intents.length - this.intents.size,
+        leases: this.leases.size,
+        totalLeases: snapshot.leases.length,
+        expiredLeases: snapshot.leases.length - this.leases.size,
+        reviews: this.reviewJobs.size,
+        expertRequests: this.expertRequests.size,
+      },
+      '[StateCache] Restored from snapshot',
     );
+  }
+
+  /**
+   * Get expert configuration
+   */
+  getExpertConfig(): { maxPendingPerAgent: number } | undefined {
+    // If expert worker is disabled or config missing, return undefined
+    if (this.config.expertWorker?.enabled !== true) {
+      return undefined;
+    }
+    return {
+      maxPendingPerAgent: this.config.expertWorker.maxPendingPerAgent,
+    };
   }
 
   /**

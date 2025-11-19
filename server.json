@@ -1,12 +1,12 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
   "name": "io.github.propstreet/agenthub",
   "title": "AgentHub - Lean MCP Orchestrator",
   "description": "Enables coding agents to coordinate edits, reviews, and escalations without file locking conflicts",
   "version": "1.0.0",
   "packages": [
     {
-      "registry_type": "npm",
+      "registryType": "npm",
       "identifier": "@propstreet/agenthub",
       "version": "1.0.0",
       "transport": {

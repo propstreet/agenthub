@@ -13,11 +13,14 @@ export async function handleStateGet(
   try {
     // Use Zod schema for validation
     const data = StateGetSchema.parse(payload);
-    const snapshot = state.getSnapshot(data.since);
+    const snapshot = state.getSnapshot({
+      ...(data.since !== undefined && { since: data.since }),
+      ...(data.filter !== undefined && { filter: data.filter }),
+    });
 
     return {
       ok: true,
-      d: snapshot,
+      d: snapshot as StateSnapshot, // Cast needed because HubOpResponse expects specific type, but Partial is fine for JSON
       t: Date.now(),
     };
   } catch (error) {

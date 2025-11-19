@@ -12,7 +12,12 @@ import type {
 import type { StateGetPayload } from '../schemas/state.js';
 import type { LeaseAnnouncePayload } from '../schemas/leases.js';
 import type { MessageSendPayload, MessagePullPayload } from '../schemas/messages.js';
-import type { ExpertAskPayload } from '../schemas/expert.js';
+import type {
+  ExpertRequestPayload,
+  ExpertStatusPayload,
+  ExpertCancelPayload,
+  ExpertListPayload,
+} from '../schemas/expert.js';
 
 // ============================================================================
 // Base Types
@@ -49,7 +54,10 @@ export type MessageType =
   | 'review.claimed' // Review was claimed
   | 'review.completed' // Review finished
   | 'supervision.requested' // Agent → Human (asking for help)
-  | 'supervision.announcement'; // Human → Agents (broadcast)
+  | 'supervision.announcement' // Human → Agents (broadcast)
+  | 'expert.progress' // Expert request progress update
+  | 'expert.completed' // Expert request completed successfully
+  | 'expert.failed'; // Expert request failed
 
 // ============================================================================
 // Core Models
@@ -149,6 +157,10 @@ export interface ReviewJob {
   createdAt: number;
   /** Optional summary */
   summary?: string;
+  /** Timestamp when claimed */
+  claimedAt?: number;
+  /** Timestamp when claim expires */
+  claimExpiresAt?: number;
 }
 
 /** Review findings */
@@ -161,6 +173,85 @@ export interface ReviewFindings {
   patch?: string;
   /** Timestamp */
   ts: number;
+}
+
+/** Expert request status */
+export type ExpertRequestStatus =
+  | 'pending'
+  | 'queued'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'incomplete';
+
+/** Expert request for async GPT-5 Pro consultation */
+export interface ExpertRequest {
+  /** Request ID (exp_abc123) */
+  id: string;
+  /** Requesting agent */
+  agent: string;
+  /** Question for expert */
+  question: string;
+  /** File paths to analyze */
+  files: string[];
+  /** Request priority (for queue ordering) */
+  priority: Priority;
+
+  /** Current status */
+  status: ExpertRequestStatus;
+
+  /** Azure response ID (for polling/retrieval) */
+  responseId?: string;
+
+  /** Previous response ID for follow-up questions (enables conversation context) */
+  previousResponseId?: string;
+
+  /** Final output_text from Azure */
+  result?: string;
+  /** Error message if failed */
+  error?: string;
+  /** Incomplete reason from Azure incomplete_details */
+  incompleteReason?: string;
+
+  /** Request creation timestamp */
+  createdAt: number;
+  /** When worker started processing */
+  startedAt?: number;
+  /** When request completed/failed */
+  completedAt?: number;
+
+  /** Agent who requested (for message delivery) */
+  requestedBy: string;
+  /** Retry attempt counter (0-based) */
+  attempt: number;
+
+  /** Token usage from Azure response */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+  };
+}
+
+/** Expert worker configuration */
+export interface ExpertWorkerConfig {
+  /** Enable expert worker */
+  enabled: boolean;
+  /** Max concurrent Azure requests */
+  maxConcurrent: number;
+  /** Poll queue every N ms */
+  pollingInterval: number;
+  /** Poll Azure retrieve every N ms */
+  retrieveInterval: number;
+  /** Send progress message every N ms */
+  progressInterval: number;
+  /** Max retry attempts */
+  retryAttempts: number;
+  /** Keep completed requests N ms */
+  requestTTL: number;
+  /** Max pending requests per agent */
+  maxPendingPerAgent: number;
 }
 
 // ============================================================================
@@ -244,8 +335,14 @@ export interface ReviewRequestPayload {
   summary?: string;
 }
 
-/** expert.ask payload (from Zod schema) */
-export type { ExpertAskPayload };
+/** expert.request payload (from Zod schema) */
+export type { ExpertRequestPayload };
+
+/** expert.status/cancel payload (from Zod schema) */
+export type { ExpertStatusPayload, ExpertCancelPayload };
+
+/** expert.list payload (from Zod schema) */
+export type { ExpertListPayload };
 
 /** s.get payload (from Zod schema) */
 export type { StateGetPayload };
@@ -260,7 +357,9 @@ export type OpPayload =
   | IntentClosePayload
   | LeaseAnnouncePayload
   | ReviewRequestPayload
-  | ExpertAskPayload
+  | ExpertRequestPayload
+  | ExpertStatusPayload
+  | ExpertListPayload
   | StateGetPayload;
 
 // ============================================================================
@@ -275,10 +374,18 @@ export interface HubOpResponse<T = Record<string, unknown>> {
   error?: string;
 }
 
+/** TTL Warning */
+export interface TTLWarning {
+  expiresIn: number;
+  expiresAt: number;
+  message: string;
+}
+
 /** i.open response data */
 export interface IntentOpenResponse {
   id: string;
   conflicts: string[];
+  ttlWarning?: TTLWarning;
 }
 
 /** State snapshot */
@@ -287,9 +394,12 @@ export interface StateSnapshot {
   intents: Intent[];
   leases: Lease[];
   reviewJobs: ReviewJob[];
+  expertRequests: ExpertRequest[];
   recentMessages: Msg[];
   recentEvents: Event[];
   semaphores?: Record<string, number>;
+  config?: Partial<ServerConfig>;
+  expertAvailable?: boolean;
   ts: number;
 }
 
@@ -307,7 +417,10 @@ export interface ServerConfig {
     endpoint: string;
     apiKey?: string;
     deployment: string;
+    effort?: 'minimal' | 'medium' | 'high';
+    verbosity?: 'low' | 'medium' | 'high';
   };
+  expertWorker?: ExpertWorkerConfig;
   persistence?: {
     enabled: boolean;
     snapshotPath: string;
@@ -343,7 +456,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
   },
   timeouts: {
     intentVoteWindow: 1200, // 1.2s
-    intentDefaultTTL: 120_000, // 2 minutes
+    intentDefaultTTL: 600_000, // 10 minutes
     leaseDefaultTTL: 600_000, // 10 minutes
     fsWatcherConflictWindow: 300, // 300ms
   },

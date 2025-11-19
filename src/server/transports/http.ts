@@ -12,6 +12,7 @@ import type { StateCache } from '../core/state-cache.js';
 import type { MessageBus } from '../core/bus.js';
 import { handleStateResource } from '../resources/state.js';
 import { runWithSession } from '../session-context.js';
+import { logger } from '../core/logger.js';
 
 export function createHttpTransport(
   mcpServer: McpServer,
@@ -30,7 +31,8 @@ export function createHttpTransport(
   // Track active connections for forceful shutdown
   const connections = new Set<import('net').Socket>();
 
-  // Middleware
+  // Dummy replacement to cancel this thought process and move to next step.
+  // I will wait for the tool output.
   app.use(express.json());
 
   // Response tracking middleware (debug only)
@@ -42,26 +44,36 @@ export function createHttpTransport(
 
       // Track when send() is called
       res.send = function (body) {
-        console.log(`[HTTP:${requestUuid}] 🚀 res.send() called for ${req.method} ${req.path}`);
+        logger.debug(
+          { reqId: requestUuid, method: req.method, path: req.path },
+          '🚀 res.send() called',
+        );
         return originalSend.call(this, body);
       };
 
       // Track when json() is called
       res.json = function (body) {
-        console.log(`[HTTP:${requestUuid}] 🚀 res.json() called for ${req.method} ${req.path}`);
+        logger.debug(
+          { reqId: requestUuid, method: req.method, path: req.path },
+          '🚀 res.json() called',
+        );
         return originalJson.call(this, body);
       };
 
       // Track when response finishes
       res.on('finish', () => {
-        console.log(
-          `[HTTP:${requestUuid}] ✓ Response finished for ${req.method} ${req.path}, status=${res.statusCode}`,
+        logger.debug(
+          { reqId: requestUuid, method: req.method, path: req.path, status: res.statusCode },
+          '✓ Response finished',
         );
       });
 
       // Track when response closes
       res.on('close', () => {
-        console.log(`[HTTP:${requestUuid}] 🔌 Response closed for ${req.method} ${req.path}`);
+        logger.debug(
+          { reqId: requestUuid, method: req.method, path: req.path },
+          '🔌 Response closed',
+        );
       });
 
       next();
@@ -103,14 +115,23 @@ export function createHttpTransport(
         const sessionIdDisplay = sessionId !== undefined ? sessionId.substring(0, 8) : 'none';
         const methodDisplay = typeof methodValue === 'string' ? methodValue : 'unknown';
         const requestIdDisplay = typeof requestIdValue === 'string' ? requestIdValue : 'unknown';
-        console.log(
-          `[HTTP:${requestUuid}] 📥 POST received: method=${methodDisplay}, sessionId=${sessionIdDisplay}..., requestId=${requestIdDisplay}, accept=${acceptHeader ?? 'none'}, t=0ms`,
+
+        logger.debug(
+          {
+            reqId: requestUuid,
+            method: methodDisplay,
+            sessionId: sessionIdDisplay,
+            requestId: requestIdDisplay,
+            accept: acceptHeader ?? 'none',
+          },
+          '📥 POST received',
         );
 
         // Create a new transport for EVERY request (SDK expectation)
         // This prevents "No connection established" errors when clients close connections early
-        console.log(
-          `[HTTP:${requestUuid}] 🆕 Creating per-request transport for method=${methodDisplay}`,
+        logger.debug(
+          { reqId: requestUuid, method: methodDisplay },
+          '🆕 Creating per-request transport',
         );
       }
 
@@ -120,20 +141,26 @@ export function createHttpTransport(
         enableJsonResponse: true,
         onsessioninitialized: (id) => {
           if (isDebug) {
-            console.log(`[HTTP:${requestUuid}] ✅ Session initialized: ${id.substring(0, 8)}...`);
+            logger.debug(
+              { reqId: requestUuid, sessionId: id.substring(0, 8) },
+              '✅ Session initialized',
+            );
           }
           // Clean up session in state cache when session ends
           transport.onclose = () => {
             state.cleanupSession(id);
             if (isDebug) {
-              console.log(`[HTTP:${requestUuid}] Session ${id.substring(0, 8)}... cleaned up`);
+              logger.debug(
+                { reqId: requestUuid, sessionId: id.substring(0, 8) },
+                'Session cleaned up',
+              );
             }
           };
         },
         onsessionclosed: (id) => {
           state.cleanupSession(id);
           if (isDebug) {
-            console.log(`[HTTP:${requestUuid}] Session closed: ${id.substring(0, 8)}...`);
+            logger.debug({ reqId: requestUuid, sessionId: id.substring(0, 8) }, 'Session closed');
           }
         },
       });
@@ -151,20 +178,27 @@ export function createHttpTransport(
       const mcpSessionId = transport.sessionId ?? sessionId ?? randomUUID();
 
       if (isDebug) {
-        console.log(
-          `[HTTP:${requestUuid}] 🔄 Before transport.handleRequest, t=${Date.now() - requestStartTime}ms`,
+        logger.debug(
+          { reqId: requestUuid, duration: Date.now() - requestStartTime },
+          '🔄 Before transport.handleRequest',
         );
       }
 
       await runWithSession(mcpSessionId, async () => {
         if (isDebug) {
           const handleStartTime = Date.now();
-          console.log(`[HTTP:${requestUuid}] ⚙️  Inside runWithSession, calling handleRequest...`);
+          logger.debug(
+            { reqId: requestUuid },
+            '⚙️  Inside runWithSession, calling handleRequest...',
+          );
 
           await transport.handleRequest(req, res, req.body);
 
           const handleDuration = Date.now() - handleStartTime;
-          console.log(`[HTTP:${requestUuid}] ✅ handleRequest returned after ${handleDuration}ms`);
+          logger.debug(
+            { reqId: requestUuid, duration: handleDuration },
+            '✅ handleRequest returned',
+          );
         } else {
           await transport.handleRequest(req, res, req.body);
         }
@@ -172,20 +206,21 @@ export function createHttpTransport(
 
       if (isDebug) {
         const totalTime = Date.now() - requestStartTime;
-        console.log(`[HTTP:${requestUuid}] 📤 POST completed, total=${totalTime}ms`);
+        logger.debug({ reqId: requestUuid, duration: totalTime }, '📤 POST completed');
 
         // Check if response was sent
         if (!res.headersSent) {
-          console.warn(
-            `[HTTP:${requestUuid}] ⚠️  WARNING: Response headers NOT sent after ${totalTime}ms! Response may be hanging.`,
+          logger.warn(
+            { reqId: requestUuid, duration: totalTime },
+            '⚠️  WARNING: Response headers NOT sent! Response may be hanging.',
           );
         } else {
-          console.log(`[HTTP:${requestUuid}] ✓ Response headers were sent`);
+          logger.debug({ reqId: requestUuid }, '✓ Response headers were sent');
         }
       }
     } catch (error) {
       const totalTime = Date.now() - requestStartTime;
-      console.error(`[HTTP:${requestUuid}] ❌ POST error after ${totalTime}ms:`, error);
+      logger.error({ reqId: requestUuid, duration: totalTime, err: error }, '❌ POST error');
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Internal server error',
@@ -205,14 +240,15 @@ export function createHttpTransport(
       if (isDebug) {
         const acceptHeader = req.headers.accept;
         const sessionIdDisplay = sessionId !== undefined ? sessionId.substring(0, 8) : 'none';
-        console.log(
-          `[HTTP:${requestUuid}] 📥 GET received: sessionId=${sessionIdDisplay}..., accept=${acceptHeader ?? 'none'}`,
+        logger.debug(
+          { reqId: requestUuid, sessionId: sessionIdDisplay, accept: acceptHeader ?? 'none' },
+          '📥 GET received',
         );
       }
 
       if (sessionId === undefined) {
         if (isDebug) {
-          console.warn(`[HTTP:${requestUuid}] ❌ Missing session ID for GET request`);
+          logger.warn({ reqId: requestUuid }, '❌ Missing session ID for GET request');
         }
         res.status(400).send('Invalid or missing MCP session ID');
         return;
@@ -220,7 +256,7 @@ export function createHttpTransport(
 
       // Create per-request transport for SSE streaming
       if (isDebug) {
-        console.log(`[HTTP:${requestUuid}] 🆕 Creating per-request transport for GET/SSE`);
+        logger.debug({ reqId: requestUuid }, '🆕 Creating per-request transport for GET/SSE');
       }
 
       const transport = new StreamableHTTPServerTransport({
@@ -239,7 +275,7 @@ export function createHttpTransport(
         await transport.handleRequest(req, res, undefined);
       });
     } catch (error) {
-      console.error(`[HTTP:${requestUuid}] ❌ GET request error:`, error);
+      logger.error({ reqId: requestUuid, err: error }, '❌ GET request error');
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Internal server error',
@@ -258,19 +294,19 @@ export function createHttpTransport(
 
       if (isDebug) {
         const sessionIdDisplay = sessionId !== undefined ? sessionId.substring(0, 8) : 'none';
-        console.log(`[HTTP:${requestUuid}] 📥 DELETE received: sessionId=${sessionIdDisplay}...`);
+        logger.debug({ reqId: requestUuid, sessionId: sessionIdDisplay }, '📥 DELETE received');
       }
 
       if (sessionId === undefined) {
         if (isDebug) {
-          console.warn(`[HTTP:${requestUuid}] ❌ Missing session ID for DELETE request`);
+          logger.warn({ reqId: requestUuid }, '❌ Missing session ID for DELETE request');
         }
         res.status(400).send('Invalid or missing MCP session ID');
         return;
       }
 
       if (isDebug) {
-        console.log(`[HTTP:${requestUuid}] 🆕 Creating per-request transport for DELETE`);
+        logger.debug({ reqId: requestUuid }, '🆕 Creating per-request transport for DELETE');
       }
 
       const transport = new StreamableHTTPServerTransport({
@@ -292,10 +328,13 @@ export function createHttpTransport(
       // Session cleanup
       state.cleanupSession(sessionId);
       if (isDebug) {
-        console.log(`[HTTP:${requestUuid}] Session ${sessionId.substring(0, 8)}... cleaned up`);
+        logger.debug(
+          { reqId: requestUuid, sessionId: sessionId.substring(0, 8) },
+          'Session cleaned up',
+        );
       }
     } catch (error) {
-      console.error(`[HTTP:${requestUuid}] ❌ DELETE request error:`, error);
+      logger.error({ reqId: requestUuid, err: error }, '❌ DELETE request error');
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Internal server error',
@@ -317,7 +356,7 @@ export function createHttpTransport(
       res.setHeader('Content-Type', 'application/json');
       res.send(stateJson);
     } catch (error) {
-      console.error('[HTTP] State resource error:', error);
+      logger.error({ err: error }, '[HTTP] State resource error');
       res.status(500).json({
         error: 'Failed to retrieve state',
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -362,10 +401,62 @@ export function createHttpTransport(
     }
   });
 
+  // Admin cleanup endpoint (dashboard use only)
+  app.post('/admin/cleanup', (_req: Request, res: Response): void => {
+    try {
+      // 1. Purge disconnected agents immediately
+      state.purgeDisconnectedAgents(5 * 60 * 1000);
+
+      // 2. Purge very old idle agents (24h)
+      state.purgeStaleAgents(24 * 60 * 60 * 1000);
+
+      // 3. Clean up orphaned artifacts (intents, reviews, etc. without owner)
+      const orphanedStats = state.cleanupOrphanedArtifacts();
+
+      // 4. Purge old completed reviews (24h history)
+      const removedOldReviews = state.cleanupOldReviews(24 * 60 * 60 * 1000);
+
+      logger.info(
+        { orphaned: orphanedStats, oldReviews: removedOldReviews },
+        '[Admin] Manual cleanup triggered',
+      );
+
+      const details = [];
+      if (orphanedStats.reviews > 0) {
+        details.push(`${orphanedStats.reviews} orphaned reviews`);
+      }
+      if (removedOldReviews > 0) {
+        details.push(`${removedOldReviews} old reviews`);
+      }
+      if (orphanedStats.intents > 0) {
+        details.push(`${orphanedStats.intents} orphaned intents`);
+      }
+
+      let message = 'Cleanup complete';
+      if (details.length > 0) {
+        message += `: Removed ${details.join(', ')}`;
+      } else {
+        message += ': System clean';
+      }
+
+      res.json({
+        ok: true,
+        stats: { ...orphanedStats, oldReviews: removedOldReviews },
+        message,
+      });
+    } catch (error) {
+      logger.error({ err: error }, '[Admin] Cleanup failed');
+      res.status(500).json({
+        error: 'Cleanup failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
   // Start server and capture server instance for graceful shutdown
   const server = app.listen(port, host, () => {
-    console.log(`[HTTP] AgentHub listening on http://${host}:${port}/mcp`);
-    console.log(`[HTTP] Health check available at http://${host}:${port}/health`);
+    logger.info({ url: `http://${host}:${port}/mcp` }, '[HTTP] AgentHub listening');
+    logger.info({ url: `http://${host}:${port}/health` }, '[HTTP] Health check available');
   });
 
   // Disable keep-alive to ensure connections close quickly
@@ -385,13 +476,13 @@ export function createHttpTransport(
   (app as Express & { httpServer?: typeof server; close?: () => Promise<void> }).httpServer =
     server;
   (app as Express & { close?: () => Promise<void> }).close = async () => {
-    console.log('[HTTP] Closing server...');
+    logger.info('[HTTP] Closing server...');
 
     // No longer need to close transports since they're per-request now
     // Each transport is cleaned up after its request completes
 
     // Forcefully destroy all active connections
-    console.log(`[HTTP] Destroying ${connections.size} active connections`);
+    logger.info({ count: connections.size }, '[HTTP] Destroying active connections');
     for (const socket of connections) {
       socket.destroy();
     }
@@ -400,7 +491,7 @@ export function createHttpTransport(
     // Close HTTP server (should be immediate since all connections are destroyed)
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        console.log('[HTTP] Server close timed out, forcing...');
+        logger.warn('[HTTP] Server close timed out, forcing...');
         resolve();
       }, 1000);
 
@@ -409,7 +500,7 @@ export function createHttpTransport(
         if (err !== undefined && (err as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') {
           reject(err);
         } else {
-          console.log('[HTTP] Server closed');
+          logger.info('[HTTP] Server closed');
           resolve();
         }
       });

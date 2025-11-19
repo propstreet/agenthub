@@ -16,8 +16,10 @@ import { z } from 'zod';
 
 /** Raw schema - accepts variants */
 const AgentRegisterRawSchema = z.object({
-  // Name (optional - will be generated if not provided)
+  // Name variants: name, agent, a (optional - will be generated if not provided)
   name: z.string().optional(),
+  agent: z.string().optional(),
+  a: z.string().optional(),
 
   // Role variants: role, r, roles
   role: z.array(z.string()).optional(),
@@ -37,7 +39,7 @@ const AgentRegisterRawSchema = z.object({
  */
 export const AgentRegisterSchema = AgentRegisterRawSchema.transform((raw) => {
   // Normalize variants
-  const { name } = raw;
+  const name = raw.name ?? raw.agent ?? raw.a;
   const role = raw.role ?? raw.r ?? raw.roles;
   const version = raw.version ?? raw.v;
 

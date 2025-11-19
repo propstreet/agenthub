@@ -8,10 +8,15 @@ import BigText from 'ink-big-text';
 
 export interface HeaderProps {
   timestamp: number;
+
   paused: boolean;
+
+  persistenceEnabled: boolean;
+
+  expertEnabled: boolean;
 }
 
-export function Header({ timestamp, paused }: HeaderProps) {
+export function Header({ timestamp, paused, persistenceEnabled, expertEnabled }: HeaderProps) {
   const formattedTime = new Date(timestamp).toLocaleTimeString('en-US', {
     hour12: false,
   });
@@ -29,9 +34,24 @@ export function Header({ timestamp, paused }: HeaderProps) {
           <Text bold color="cyan">
             🤖 Multi-Agent Coordination Dashboard
           </Text>
+
           <Text dimColor> | </Text>
+
           <Text color={paused ? 'yellow' : 'green'}>Auto-refresh: {paused ? 'OFF' : 'ON'}</Text>
+
+          <Text dimColor> | </Text>
+
+          <Text color={persistenceEnabled ? 'green' : 'red'}>
+            Persistence: {persistenceEnabled ? 'ON' : 'OFF'}
+          </Text>
+
+          <Text dimColor> | </Text>
+
+          <Text color={expertEnabled ? 'green' : 'red'}>
+            Expert: {expertEnabled ? 'ON' : 'OFF'}
+          </Text>
         </Box>
+
         <Text dimColor>
           {formattedDate} {formattedTime}
         </Text>

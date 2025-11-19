@@ -148,7 +148,7 @@ export class PersistenceManager {
     }
 
     this.autoSaveTimer = setInterval(() => {
-      const snapshot = state.getSnapshot();
+      const snapshot = state.getSnapshot() as StateSnapshot;
       this.save(snapshot).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Unknown error';
         console.error(`[Persistence] Auto-save failed: ${message}`);
