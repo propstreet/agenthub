@@ -164,3 +164,42 @@ export const ReviewCompleteSchema = ReviewCompleteRawSchema.transform((raw) => {
 
 export type ReviewCompletePayload = z.output<typeof ReviewCompleteSchema>;
 // Inferred type: { jobId: string; agent?: string; severity: 'info'|'warning'|'error'|'critical'; notes: string; patch?: string }
+
+// ============================================================================
+// review.list - List review jobs
+// ============================================================================
+
+/** Raw schema - accepts variants */
+const ReviewListRawSchema = z.object({
+  // Status variants: status (canonical), s (alias)
+  status: z.enum(['pending', 'claimed', 'completed', 'failed']).optional(),
+  s: z.enum(['pending', 'claimed', 'completed', 'failed']).optional(),
+
+  // Mine only (optional)
+  mine: z.boolean().optional(),
+
+  // Unclaimed only (optional)
+  unclaimedOnly: z.boolean().optional(),
+
+  // Since timestamp (optional)
+  since: z.number().optional(),
+
+  // Limit (optional)
+  limit: z.number().optional(),
+  l: z.number().optional(),
+});
+
+export const ReviewListSchema = ReviewListRawSchema.transform((raw) => {
+  const status = raw.status ?? raw.s;
+  const limit = raw.limit ?? raw.l ?? 50;
+
+  return {
+    ...(status !== undefined && { status }),
+    ...(raw.mine !== undefined && { mine: raw.mine }),
+    ...(raw.unclaimedOnly !== undefined && { unclaimedOnly: raw.unclaimedOnly }),
+    ...(raw.since !== undefined && { since: raw.since }),
+    limit,
+  };
+});
+
+export type ReviewListPayload = z.output<typeof ReviewListSchema>;

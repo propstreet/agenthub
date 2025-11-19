@@ -10,6 +10,7 @@ import { StateCache } from './core/state-cache.js';
 import { Coordinator } from './core/coordinator.js';
 import { FilesystemWatcher } from './core/watcher.js';
 import { ExpertBridge } from './core/expert-bridge.js';
+import { ExpertWorker } from './core/expert-worker.js';
 import { PersistenceManager } from './core/persistence.js';
 import { createMCPServer } from './server.js';
 import { createHttpTransport } from './transports/http.js';
@@ -36,13 +37,25 @@ function loadConfig(): ServerConfig {
   // Azure OpenAI configuration (optional)
   const azureEndpoint = process.env['AZURE_OPENAI_ENDPOINT'];
   const apiKey = process.env['AZURE_OPENAI_API_KEY'];
+  const azureDeployment = process.env['AZURE_EXPERT_DEPLOYMENT'];
 
-  if (azureEndpoint !== undefined && azureEndpoint.length > 0) {
+  if (
+    azureEndpoint !== undefined &&
+    azureEndpoint.length > 0 &&
+    azureDeployment !== undefined &&
+    azureDeployment.length > 0
+  ) {
     config.azureOpenAI = {
       endpoint: azureEndpoint,
       ...(apiKey !== undefined && apiKey.length > 0 && { apiKey }),
-      deployment: process.env['AZURE_EXPERT_DEPLOYMENT'] ?? 'gpt-5-pro',
+      deployment: azureDeployment,
+      effort: (process.env['AZURE_EXPERT_EFFORT'] ?? 'high') as 'minimal' | 'medium' | 'high',
+      verbosity: (process.env['AZURE_EXPERT_VERBOSITY'] ?? 'low') as 'low' | 'medium' | 'high',
     };
+  } else {
+    console.warn(
+      '[Config] Azure OpenAI expert features are disabled. AZURE_OPENAI_ENDPOINT and AZURE_EXPERT_DEPLOYMENT must be set.',
+    );
   }
 
   // Persistence configuration (optional)
@@ -55,6 +68,18 @@ function loadConfig(): ServerConfig {
       autoRestore: process.env['PERSISTENCE_AUTO_RESTORE'] !== 'false',
     };
   }
+
+  // Expert Worker configuration
+  config.expertWorker = {
+    enabled: config.azureOpenAI !== undefined,
+    maxConcurrent: Number.parseInt(process.env['EXPERT_MAX_CONCURRENT'] ?? '1', 10),
+    pollingInterval: Number.parseInt(process.env['EXPERT_POLL_INTERVAL'] ?? '5000', 10),
+    retrieveInterval: Number.parseInt(process.env['EXPERT_RETRIEVE_INTERVAL'] ?? '5000', 10),
+    progressInterval: Number.parseInt(process.env['EXPERT_PROGRESS_INTERVAL'] ?? '10000', 10),
+    retryAttempts: Number.parseInt(process.env['EXPERT_RETRY_ATTEMPTS'] ?? '2', 10),
+    requestTTL: Number.parseInt(process.env['EXPERT_REQUEST_TTL'] ?? '86400000', 10),
+    maxPendingPerAgent: Number.parseInt(process.env['EXPERT_MAX_PENDING'] ?? '3', 10),
+  };
 
   return config;
 }
@@ -112,6 +137,23 @@ async function main(): Promise<void> {
   const expert = new ExpertBridge(config);
   console.log('✓ Expert Bridge');
 
+  // Initialize Expert Worker for async consultations
+  const expertWorker = new ExpertWorker(state, expert, bus, {
+    enabled: expert.isAvailable(),
+    maxConcurrent: Number.parseInt(process.env['EXPERT_MAX_CONCURRENT'] ?? '1', 10),
+    pollingInterval: Number.parseInt(process.env['EXPERT_POLL_INTERVAL'] ?? '5000', 10),
+    retrieveInterval: Number.parseInt(process.env['EXPERT_RETRIEVE_INTERVAL'] ?? '5000', 10),
+    progressInterval: Number.parseInt(process.env['EXPERT_PROGRESS_INTERVAL'] ?? '10000', 10),
+    retryAttempts: Number.parseInt(process.env['EXPERT_RETRY_ATTEMPTS'] ?? '2', 10),
+    requestTTL: Number.parseInt(process.env['EXPERT_REQUEST_TTL'] ?? '86400000', 10), // 24h
+    maxPendingPerAgent: Number.parseInt(process.env['EXPERT_MAX_PENDING'] ?? '3', 10),
+  });
+
+  if (expert.isAvailable()) {
+    expertWorker.start();
+    console.log('✓ Expert Worker (async processing)');
+  }
+
   // Initialize filesystem watcher if configured
   let watcher: FilesystemWatcher | null = null;
   if (config.watchRoot !== undefined && config.watchRoot.length > 0) {
@@ -122,7 +164,7 @@ async function main(): Promise<void> {
 
   // Create and start MCP server
   console.log('\nStarting MCP server...');
-  const mcpServer = createMCPServer(bus, state, coordinator, expert);
+  const mcpServer = createMCPServer(bus, state, coordinator, expert, config);
   const httpApp = createHttpTransport(
     mcpServer,
     bus,
@@ -135,9 +177,10 @@ async function main(): Promise<void> {
   console.log(`\n${'='.repeat(60)}`);
   console.log('AgentHub is ready!');
   console.log('='.repeat(60));
-  console.log(`\nMCP endpoint: http://${config.host}:${config.port}/mcp`);
-  console.log(`Health check: http://${config.host}:${config.port}/health`);
-  console.log(`Dashboard state: http://${config.host}:${config.port}/state/live`);
+  console.log(`\n🚀 Server:    http://${config.host}:${config.port}`);
+  console.log(`🔌 MCP:       http://${config.host}:${config.port}/mcp`);
+  console.log(`💓 Health:    http://${config.host}:${config.port}/health`);
+  console.log(`📊 Dashboard: http://${config.host}:${config.port}/state/live`);
   console.log('\nPress Ctrl+C to stop\n');
 
   // Graceful shutdown
@@ -206,6 +249,13 @@ async function main(): Promise<void> {
     console.log('[SIGINT] Clearing vote timers...');
     coordinator.clearVoteTimers();
     console.log('[SIGINT] ✓ Vote timers cleared');
+
+    // Stop expert worker if running
+    if (expert.isAvailable()) {
+      console.log('[SIGINT] Stopping expert worker...');
+      await expertWorker.stop();
+      console.log('[SIGINT] ✓ Expert worker stopped');
+    }
 
     // Save final snapshot before clearing state
     if (persistence !== null) {

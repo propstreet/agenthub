@@ -18,10 +18,39 @@ import { z } from 'zod';
 // Enum Schemas
 // ============================================================================
 
-export const ModeSchema = z.enum(['R', 'W', 'B', 'T']);
-export const PrioritySchema = z.enum(['l', 'n', 'h', 'r']);
-export const VoteSchema = z.enum(['ack', 'nack']);
-export const CloseStatusSchema = z.enum(['ok', 'abort']);
+export const ModeSchema = z
+  .enum(['R', 'W', 'B', 'T'], {
+    errorMap: () => ({
+      message:
+        'Invalid mode. Valid options: R=Read (read-only), W=Write (edit files), B=Build (compile/transform), T=Test (run tests)',
+    }),
+  })
+  .describe('Access mode: R=Read, W=Write, B=Build, T=Test');
+
+export const PrioritySchema = z
+  .enum(['l', 'n', 'h', 'r'], {
+    errorMap: () => ({
+      message:
+        'Invalid priority. Valid options: l=low, n=normal (default), h=high, r=required (critical)',
+    }),
+  })
+  .describe('Priority level: l=low, n=normal, h=high, r=required');
+
+export const VoteSchema = z
+  .enum(['ack', 'nack'], {
+    errorMap: () => ({
+      message: 'Invalid vote. Valid options: ack=approve, nack=defer',
+    }),
+  })
+  .describe('Vote decision: ack=approve, nack=defer');
+
+export const CloseStatusSchema = z
+  .enum(['ok', 'abort'], {
+    errorMap: () => ({
+      message: 'Invalid status. Valid options: ok=success, abort=cancelled/failed',
+    }),
+  })
+  .describe('Completion status: ok=success, abort=cancelled');
 
 export type Mode = z.infer<typeof ModeSchema>;
 export type Priority = z.infer<typeof PrioritySchema>;

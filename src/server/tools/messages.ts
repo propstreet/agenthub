@@ -50,6 +50,11 @@ export async function handleMessageSend(
       ...(normalized.att !== undefined && { att: normalized.att }),
     };
 
+    // If broadcast is explicitly true, ensure 'to' is undefined (already validated in schema but safe to ensure)
+    // If broadcast is false, but 'to' is undefined -> this is technically an error based on new logic,
+    // but schema doesn't enforce it yet to avoid breaking changes.
+    // For now, schema handles the validation: if broadcast=true && to!=undefined -> error.
+
     if (sessionId !== undefined) {
       state.validateAgentOwnership(data.from, sessionId);
     }
@@ -76,7 +81,6 @@ export async function handleMessagePull(
   payload: unknown,
 ): Promise<HubOpResponse> {
   const startTime = Date.now();
-  console.log(`[m.pull] Starting at ${startTime}`);
 
   try {
     // Parse payload (agent field is optional now)
@@ -90,7 +94,6 @@ export async function handleMessagePull(
       const sessionAgent = state.getAgentBySession(sessionId);
       if (sessionAgent !== undefined) {
         agent = sessionAgent.name;
-        console.log(`[m.pull] Auto-populated agent from session: ${agent}`);
       }
     }
 
@@ -98,34 +101,41 @@ export async function handleMessagePull(
       throw new Error('Agent required. Provide "agent" field or register with a.register first.');
     }
 
-    const data: { agent: string; since?: number; limit?: number } = {
+    const data = {
       agent,
       ...(parsedData.since !== undefined && { since: parsedData.since }),
       ...(parsedData.limit !== undefined && { limit: parsedData.limit }),
+      ...(parsedData.type !== undefined && { type: parsedData.type }),
+      ...(parsedData.types !== undefined && { types: parsedData.types }),
+      ...(parsedData.topic !== undefined && { topic: parsedData.topic }),
+      ...(parsedData.includeSelf !== undefined && { includeSelf: parsedData.includeSelf }),
     };
-
-    console.log(
-      `[m.pull] Pulling messages for agent=${data.agent}, since=${data.since ?? 'undefined'}`,
-    );
-    console.log(
-      `[m.pull] Session ID: ${sessionId !== undefined ? sessionId.substring(0, 8) : 'none'}...`,
-    );
 
     // Validate agent ownership (agent field is the recipient)
     if (sessionId !== undefined) {
-      const validateStart = Date.now();
       state.validateAgentOwnership(data.agent, sessionId);
-      console.log(`[m.pull] Validation took ${Date.now() - validateStart}ms`);
     }
 
-    const pullStart = Date.now();
     const messages = bus.pull(data);
-    console.log(
-      `[m.pull] Pull took ${Date.now() - pullStart}ms, found ${messages.length} messages`,
-    );
 
     const totalTime = Date.now() - startTime;
-    console.log(`[m.pull] Total time: ${totalTime}ms`);
+    // Concise logging
+    // Format: [m.pull] AgentName: N messages (Tms) [filters]
+    // Only log if messages found or explicit debug request (not available yet, so just reduce noise)
+    if (messages.length > 0) {
+      const filters = [
+        data.type !== undefined ? `type=${data.type}` : '',
+        data.types !== undefined ? `types=[${data.types.length}]` : '',
+        data.topic !== undefined ? `topic=${data.topic}` : '',
+        data.since !== undefined ? `since=${data.since}` : '',
+      ]
+        .filter((f) => f !== '')
+        .join(' ');
+
+      console.log(
+        `[m.pull] ${data.agent}: ${messages.length} messages (${totalTime}ms)${filters !== '' ? ` {${filters}}` : ''}`,
+      );
+    }
 
     return {
       ok: true,

@@ -33,6 +33,8 @@ const MessageSendRawSchema = z.object({
   data: z.unknown().optional(),
   // Attachments (deprecated, use data)
   att: z.record(z.unknown()).optional(),
+  // Broadcast flag (explicit broadcast)
+  broadcast: z.boolean().optional(),
 });
 
 export const MessageSendSchema = MessageSendRawSchema.transform((raw) => {
@@ -41,11 +43,19 @@ export const MessageSendSchema = MessageSendRawSchema.transform((raw) => {
   const type = raw.type ?? 'chat';
   const topic = raw.topic ?? 'general';
   const text = raw.text ?? raw.msg;
-  const { data, att } = raw;
+  const { data, att, broadcast } = raw;
 
   if (text === undefined) {
     throw new Error('text required. Provide message content.');
   }
+
+  // Validation for broadcast
+  if (broadcast === true && to !== undefined) {
+    throw new Error('Cannot specify both broadcast=true and to field');
+  }
+
+  // Implicit broadcast deprecation check (optional: could log warning)
+  // if (broadcast === undefined && to === undefined) { ... }
 
   return {
     ...(from !== undefined && { from }),
@@ -55,6 +65,8 @@ export const MessageSendSchema = MessageSendRawSchema.transform((raw) => {
     text,
     ...(data !== undefined && { data }),
     ...(att !== undefined && { att }),
+    // We don't pass broadcast flag to payload, it just controls 'to' validation
+    // If broadcast=true, 'to' remains undefined (which means broadcast in Bus)
   };
 });
 
@@ -65,18 +77,26 @@ const MessagePullRawSchema = z.object({
   agent: z.string().optional(),
   since: z.number().optional(),
   limit: z.number().optional(),
+  // Filtering
+  type: z.string().optional(),
+  types: z.array(z.string()).optional(),
+  topic: z.string().optional(),
+  // Options
+  includeSelf: z.boolean().optional(),
 });
 
 export const MessagePullSchema = MessagePullRawSchema.transform((raw) => {
-  const { agent } = raw;
-  const { since } = raw;
-  const { limit } = raw;
+  const { agent, since, limit, type, types, topic, includeSelf } = raw;
 
   // Agent is now optional - will be auto-populated from session in handler
   return {
     ...(agent !== undefined && { agent }),
     ...(since !== undefined && { since }),
     ...(limit !== undefined && { limit }),
+    ...(type !== undefined && { type }),
+    ...(types !== undefined && { types }),
+    ...(topic !== undefined && { topic }),
+    ...(includeSelf !== undefined && { includeSelf }),
   };
 });
 

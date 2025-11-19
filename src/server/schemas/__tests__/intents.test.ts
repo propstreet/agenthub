@@ -17,7 +17,7 @@ describe('IntentOpenSchema', () => {
     expect(result.paths).toEqual(['src/**/*.ts']);
     expect(result.mode).toBe('W');
     expect(result.priority).toBe('n');
-    expect(result.ttlMs).toBe(120000);
+    expect(result.ttlMs).toBeUndefined();
   });
 
   it('normalizes variants', () => {
@@ -176,12 +176,12 @@ describe('IntentRenewSchema', () => {
     expect(result.ttlMs).toBe(60000);
   });
 
-  it('applies default ttlMs (120000ms = 2 minutes)', () => {
+  it('applies default ttlMs (should be undefined, handler sets)', () => {
     const result = IntentRenewSchema.parse({
       id: 'i_abc123',
     });
 
-    expect(result.ttlMs).toBe(120000);
+    expect(result.ttlMs).toBeUndefined();
   });
 
   it('throws on missing id', () => {

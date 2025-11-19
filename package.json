@@ -14,8 +14,9 @@
     "dist"
   ],
   "scripts": {
-    "dev": "tsx watch src/server/index.ts",
+    "dev": "NODE_ENV=development tsx watch src/server/index.ts",
     "dashboard": "tsx src/dashboard/index.tsx",
+    "dashboard:dev": "node --import tsx --watch src/dashboard/index.tsx",
     "build": "tsc && shx chmod +x dist/server/index.js dist/dashboard/index.js",
     "build:server": "tsc --project tsconfig.json",
     "build:dashboard": "npm run build && chmod +x dist/dashboard/index.js",
@@ -24,10 +25,11 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run check",
     "test": "vitest",
+    "test:run": "vitest run",
     "test:dashboard": "vitest --run src/dashboard",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
+    "format": "prettier --write . --log-level warn",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm run format:check"
@@ -65,6 +67,7 @@
     "micromatch": "^4.0.8",
     "nanoid": "^5.1.6",
     "openai": "^6.8.1",
+    "pino": "^10.1.0",
     "react": "^19.2.0",
     "zod": "^3.25.76"
   },
@@ -80,6 +83,7 @@
     "eslint-plugin-prettier": "^5.5.4",
     "globals": "^16.5.0",
     "ink-testing-library": "^4.0.0",
+    "pino-pretty": "^13.1.2",
     "prettier": "^3.6.2",
     "shx": "^0.4.0",
     "tsx": "^4.20.6",

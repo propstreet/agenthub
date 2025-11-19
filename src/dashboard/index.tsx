@@ -15,6 +15,9 @@ const POLL_INTERVAL = 500; // 500ms
 
 function App() {
   const [paused, setPaused] = useState(false);
+  const togglePause = () => {
+    setPaused(!paused);
+  };
   const { state, error, isLoading, refresh } = useHubState(HUB_URL, POLL_INTERVAL, paused);
 
   // Error state
@@ -54,14 +57,17 @@ function App() {
     <Dashboard
       state={state}
       paused={paused}
-      onTogglePause={() => {
-        setPaused(!paused);
-        return undefined;
-      }}
+      onTogglePause={togglePause}
       onRefresh={refresh}
+      persistenceEnabled={state.config?.persistence?.enabled === true}
+      expertEnabled={state.expertAvailable === true}
     />
   );
 }
+
+// Clear the console before rendering
+// \x1Bc is the escape code to reset the terminal
+process.stdout.write('\x1Bc');
 
 // Render the app
 render(<App />);

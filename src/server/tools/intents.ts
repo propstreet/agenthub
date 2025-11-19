@@ -18,6 +18,7 @@ export async function handleIntentOpen(
   state: StateCache,
   coordinator: Coordinator,
   payload: unknown,
+  defaultTTL: number,
 ): Promise<HubOpResponse<IntentOpenResponse>> {
   try {
     // Use Zod schema for validation and normalization
@@ -40,7 +41,7 @@ export async function handleIntentOpen(
       paths: normalized.paths,
       mode: normalized.mode,
       priority: normalized.priority,
-      ttlMs: normalized.ttlMs,
+      ttlMs: normalized.ttlMs ?? defaultTTL,
       ...(normalized.hunks !== undefined && { hunks: normalized.hunks }),
     };
 
@@ -118,10 +119,14 @@ export async function handleIntentRenew(
   state: StateCache,
   coordinator: Coordinator,
   payload: unknown,
+  defaultTTL: number,
 ): Promise<HubOpResponse> {
   try {
     // Use Zod schema for validation and normalization
     const data = IntentRenewSchema.parse(payload);
+
+    // Apply default TTL if not provided
+    const ttlMs = data.ttlMs ?? defaultTTL;
 
     // Validate agent ownership by looking up the intent
     const sessionId = getCurrentSessionId();
@@ -132,7 +137,7 @@ export async function handleIntentRenew(
       }
     }
 
-    const result = coordinator.renewIntent(data);
+    const result = coordinator.renewIntent({ id: data.id, ttlMs });
 
     return {
       ok: result.ok,

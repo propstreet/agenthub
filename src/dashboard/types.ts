@@ -18,4 +18,6 @@ export interface DashboardProps {
   paused: boolean;
   onTogglePause: () => void;
   onRefresh: () => void;
+  persistenceEnabled: boolean;
+  expertEnabled: boolean;
 }

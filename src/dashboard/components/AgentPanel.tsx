@@ -3,17 +3,25 @@
  */
 
 import { Box, Text } from 'ink';
+
 import type { Agent } from '../../server/types/models.js';
+
 import { calculateTimeAgo, getAgentStatus } from '../utils/time-utils.js';
+
+import { Panel } from './Panel.js';
 
 export interface AgentPanelProps {
   agents: Agent[];
+
+  shortcutKey?: string;
 }
 
-export function AgentPanel({ agents }: AgentPanelProps) {
+export function AgentPanel({ agents, shortcutKey }: AgentPanelProps) {
   // Use the robust agent status utility to determine actual status
+
   const getEnhancedStatus = (agent: Agent) => {
     const statusInfo = getAgentStatus(agent.lastSeen);
+
     return statusInfo;
   };
 
@@ -21,40 +29,65 @@ export function AgentPanel({ agents }: AgentPanelProps) {
     return calculateTimeAgo(lastSeen);
   };
 
+  const activeAgents = agents.filter((a) => {
+    const status = getEnhancedStatus(a);
+
+    return status.status !== 'offline';
+  });
+
+  const disconnectedAgents = agents.filter((a) => {
+    const status = getEnhancedStatus(a);
+
+    return status.status === 'offline';
+  });
+
+  const title = `👥 Active Agents (${String(activeAgents.length)} active, ${String(
+    disconnectedAgents.length,
+  )} stale)`;
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="blue" padding={1}>
-      <Box marginBottom={1}>
-        <Text bold color="blue">
-          👥 Active Agents ({agents.length})
-        </Text>
-      </Box>
+    <Panel
+      title={title}
+      titleColor="blue"
+      borderColor="blue"
+      shortcutKey={shortcutKey}
+      empty={agents.length === 0}
+      emptyMessage="No agents connected"
+    >
+      {activeAgents.map((agent) => {
+        const status = getEnhancedStatus(agent);
 
-      {agents.length === 0 ? (
-        <Text dimColor>No agents connected</Text>
-      ) : (
-        <Box flexDirection="column">
-          {agents.map((agent) => {
-            const status = getEnhancedStatus(agent);
-            return (
-              <Box key={agent.name} marginBottom={1}>
-                <Box width={20}>
-                  <Text color={status.color}>
-                    {status.icon} {agent.name}
-                  </Text>
-                </Box>
+        return (
+          <Box key={agent.name} marginBottom={1}>
+            <Box width={20}>
+              <Text color={status.color}>
+                {status.icon} {agent.name}
+              </Text>
+            </Box>
 
-                <Box width={20}>
-                  <Text dimColor>{agent.role.join(', ')}</Text>
-                </Box>
+            <Box width={20}>
+              <Text dimColor>{agent.role.join(', ')}</Text>
+            </Box>
 
-                <Box width={15}>
-                  <Text dimColor>{getTimeSince(agent.lastSeen)}</Text>
-                </Box>
-              </Box>
-            );
-          })}
-        </Box>
+            <Box width={15}>
+              <Text dimColor>{getTimeSince(agent.lastSeen)}</Text>
+            </Box>
+          </Box>
+        );
+      })}
+
+      {disconnectedAgents.length > 0 && (
+        <>
+          <Box borderStyle="single" borderColor="gray" marginTop={0} marginBottom={1} />
+
+          <Box marginBottom={1}>
+            <Text dimColor>
+              {'> '}
+              {disconnectedAgents.length} disconnected agents (press 'c' to cleanup)
+            </Text>
+          </Box>
+        </>
       )}
-    </Box>
+    </Panel>
   );
 }

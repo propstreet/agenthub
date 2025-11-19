@@ -19,8 +19,18 @@ import {
 } from './tools/intents.js';
 import { handleLeaseAnnounce } from './tools/leases.js';
 import { handleMessageSend, handleMessagePull } from './tools/messages.js';
-import { handleReviewRequest, handleReviewClaim, handleReviewComplete } from './tools/review.js';
-import { handleExpertAsk } from './tools/expert.js';
+import {
+  handleReviewRequest,
+  handleReviewClaim,
+  handleReviewComplete,
+  handleReviewList,
+} from './tools/review.js';
+import {
+  handleExpertRequest,
+  handleExpertStatus,
+  handleExpertCancel,
+  handleExpertList,
+} from './tools/expert.js';
 import { handleStateGet } from './tools/state.js';
 import { handleAgentRegister } from './tools/agents.js';
 import { handleHelp } from './tools/help.js';
@@ -29,12 +39,14 @@ import { handleHelp } from './tools/help.js';
 import { handleInboxResource } from './resources/inbox.js';
 import { handleStateResource } from './resources/state.js';
 import { handleMessagesResource } from './resources/messages.js';
+import { handleDocsResource } from './resources/docs.js';
 
 export function createMCPServer(
   bus: MessageBus,
   state: StateCache,
   coordinator: Coordinator,
   expert: ExpertBridge,
+  config: import('./types/models.js').ServerConfig,
 ): McpServer {
   const server = new McpServer({
     name: 'agenthub',
@@ -52,26 +64,42 @@ export function createMCPServer(
       description:
         'Multi-agent coordination. Ops: a.register (agent), i.open|i.vote|i.renew|i.close (intents), ' +
         'l.announce (lease), m.send|m.pull (messages), review.request|review.claim|review.complete (code review), ' +
-        'expert.ask (escalation), s.get (state), s.help (self-discovery). ' +
-        'Fields: agent, paths[], mode(R|W|B|T), priority(l|n|h|r), ttlMs',
+        'expert.request|expert.status|expert.cancel|expert.list (async GPT-5 Pro), s.get (state), s.help (self-discovery). ' +
+        '\n\nCommon fields:' +
+        '\n- agent: Agent name (auto-resolved from session if omitted)' +
+        '\n- paths: File paths or globs (e.g., ["src/**/*.ts"])' +
+        '\n- mode: Access mode - R=Read (read-only), W=Write (edit files), B=Build (compile/transform), T=Test (run tests)' +
+        '\n- priority: l=low, n=normal, h=high, r=required (critical/blocking)' +
+        '\n- ttlMs: Time-to-live in milliseconds (default: 600000 for intents, 600000 for leases)' +
+        '\n\nRun s.help for detailed examples and full API reference.',
       inputSchema: {
-        op: z.enum([
-          'a.register',
-          'i.open',
-          'i.vote',
-          'i.renew',
-          'i.close',
-          'l.announce',
-          'm.send',
-          'm.pull',
-          'review.request',
-          'review.claim',
-          'review.complete',
-          'expert.ask',
-          's.get',
-          's.help',
-        ]),
-        d: z.record(z.unknown()),
+        op: z
+          .enum([
+            'a.register',
+            'i.open',
+            'i.vote',
+            'i.renew',
+            'i.close',
+            'l.announce',
+            'm.send',
+            'm.pull',
+            'review.request',
+            'review.claim',
+            'review.complete',
+            'review.list',
+            'expert.request',
+            'expert.status',
+            'expert.cancel',
+            'expert.list',
+            's.get',
+            's.help',
+          ])
+          .describe(
+            'Operation to perform. Use s.help to see all available operations with examples.',
+          ),
+        d: z
+          .record(z.unknown())
+          .describe('Operation-specific data payload. Required fields vary by operation.'),
       },
     },
     async ({ op, d }) => {
@@ -88,13 +116,23 @@ export function createMCPServer(
 
           // Intent operations
           case 'i.open':
-            result = await handleIntentOpen(state, coordinator, d);
+            result = await handleIntentOpen(
+              state,
+              coordinator,
+              d,
+              config.timeouts.intentDefaultTTL,
+            );
             break;
           case 'i.vote':
             result = await handleIntentVote(state, coordinator, d);
             break;
           case 'i.renew':
-            result = await handleIntentRenew(state, coordinator, d);
+            result = await handleIntentRenew(
+              state,
+              coordinator,
+              d,
+              config.timeouts.intentDefaultTTL,
+            );
             break;
           case 'i.close':
             result = await handleIntentClose(state, coordinator, d);
@@ -123,10 +161,22 @@ export function createMCPServer(
           case 'review.complete':
             result = await handleReviewComplete(state, bus, d);
             break;
+          case 'review.list':
+            result = await handleReviewList(state, d);
+            break;
 
-          // Expert escalation
-          case 'expert.ask':
-            result = await handleExpertAsk(expert, state, bus, d);
+          // Async expert operations
+          case 'expert.request':
+            result = await handleExpertRequest(state, expert, d);
+            break;
+          case 'expert.status':
+            result = await handleExpertStatus(state, d);
+            break;
+          case 'expert.cancel':
+            result = await handleExpertCancel(state, expert, d);
+            break;
+          case 'expert.list':
+            result = await handleExpertList(state, d);
             break;
 
           // State query
@@ -286,6 +336,29 @@ export function createMCPServer(
     },
     async (uri: URL) => {
       const json = await handleMessagesResource(state, bus);
+
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: 'application/json',
+            text: json,
+          },
+        ],
+      };
+    },
+  );
+
+  // docs://reference - Complete API reference documentation
+  server.registerResource(
+    'docs-reference',
+    'docs://reference',
+    {
+      title: 'API Reference',
+      description: 'Complete AgentHub API documentation with modes, priorities, and examples',
+    },
+    async (uri: URL) => {
+      const json = handleDocsResource();
 
       return {
         contents: [

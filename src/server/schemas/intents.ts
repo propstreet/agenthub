@@ -56,7 +56,7 @@ export const IntentOpenSchema = IntentOpenRawSchema.transform((raw) => {
   const paths = raw.paths ?? raw.p;
   const mode = raw.mode ?? raw.m;
   const priority = raw.priority ?? raw.prio ?? 'n'; // Default: normal
-  const ttlMs = raw.ttlMs ?? raw.ttl ?? 120000; // Default: 2 minutes
+  const ttlMs = raw.ttlMs ?? raw.ttl;
   const { hunks } = raw;
 
   // Validate required fields
@@ -68,7 +68,7 @@ export const IntentOpenSchema = IntentOpenRawSchema.transform((raw) => {
   }
 
   // Validate ttlMs is positive
-  if (ttlMs <= 0) {
+  if (ttlMs !== undefined && ttlMs <= 0) {
     throw new Error('ttlMs must be positive');
   }
 
@@ -77,13 +77,13 @@ export const IntentOpenSchema = IntentOpenRawSchema.transform((raw) => {
     paths,
     mode,
     priority,
-    ttlMs,
+    ...(ttlMs !== undefined && { ttlMs }),
     ...(hunks !== undefined && hunks.length > 0 && { hunks }),
   };
 });
 
 export type IntentOpenPayload = z.output<typeof IntentOpenSchema>;
-// Inferred type: { agent?: string; paths: string[]; mode: Mode; priority: Priority; ttlMs: number; hunks?: string[] }
+// Inferred type: { agent?: string; paths: string[]; mode: Mode; priority: Priority; ttlMs?: number; hunks?: string[] }
 
 // ============================================================================
 // i.close - Close an intent
@@ -167,7 +167,7 @@ const IntentRenewRawSchema = z.object({
 export const IntentRenewSchema = IntentRenewRawSchema.transform((raw) => {
   // Normalize variants
   const { id } = raw;
-  const ttlMs = raw.ttlMs ?? raw.ttl ?? 120000; // Default: 2 minutes
+  const ttlMs = raw.ttlMs ?? raw.ttl;
 
   // Validate required fields
   if (id === undefined) {
@@ -175,15 +175,18 @@ export const IntentRenewSchema = IntentRenewRawSchema.transform((raw) => {
   }
 
   // Validate ttlMs is positive
-  if (ttlMs <= 0) {
+  if (ttlMs !== undefined && ttlMs <= 0) {
     throw new Error('ttlMs must be positive');
   }
 
-  return { id, ttlMs };
+  return {
+    id,
+    ...(ttlMs !== undefined && { ttlMs }),
+  };
 });
 
 export type IntentRenewPayload = z.output<typeof IntentRenewSchema>;
-// Inferred type: { id: string; ttlMs: number }
+// Inferred type: { id: string; ttlMs?: number }
 
 // ============================================================================
 // i.vote - Vote on an intent

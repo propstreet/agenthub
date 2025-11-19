@@ -8,7 +8,6 @@ import micromatch from 'micromatch';
 import type {
   Intent,
   Lease,
-  IntentRenewPayload,
   IntentClosePayload,
   IntentOpenResponse,
   ServerConfig,
@@ -21,6 +20,7 @@ import type {
 } from '../types/payloads.js';
 import type { MessageBus } from './bus.js';
 import type { StateCache } from './state-cache.js';
+import { logger } from './logger.js';
 
 /**
  * Priority ordering (higher number = higher priority)
@@ -93,17 +93,29 @@ export class Coordinator {
     // Start vote window timer
     this.startVoteWindow(intent.id);
 
-    console.log(
-      `[Coordinator] Intent opened: ${intent.id} by ${intent.agent} (${intent.mode}) on ${intent.paths.join(', ')}`,
+    logger.info(
+      { intentId: intent.id, agent: intent.agent, mode: intent.mode, paths: intent.paths },
+      '[Coordinator] Intent opened',
     );
 
     if (conflicts.length > 0) {
-      console.warn(`[Coordinator] Conflicts detected: ${conflicts.join(', ')}`);
+      logger.warn({ intentId: intent.id, conflicts }, '[Coordinator] Conflicts detected');
+    }
+
+    // Check for low TTL warning
+    let ttlWarning;
+    if (intent.ttlMs < 60000) {
+      ttlWarning = {
+        expiresIn: intent.ttlMs,
+        expiresAt: intent.createdAt + intent.ttlMs,
+        message: 'Intent expires in less than 60 seconds. Consider renewing.',
+      };
     }
 
     return {
       id: intent.id,
       conflicts,
+      ...(ttlWarning !== undefined && { ttlWarning }),
     };
   }
 
@@ -134,8 +146,9 @@ export class Coordinator {
     if (payload.vote === 'nack') {
       this.state.updateIntentStatus(payload.id, 'needs_rebase');
 
-      console.warn(
-        `[Coordinator] Intent ${payload.id} received NACK from ${payload.agent}: ${payload.reason ?? 'no reason'}`,
+      logger.warn(
+        { intentId: payload.id, voter: payload.agent, reason: payload.reason },
+        '[Coordinator] Intent NACK received',
       );
 
       // Send message to intent owner
@@ -159,7 +172,11 @@ export class Coordinator {
   /**
    * Renew intent heartbeat (extends TTL)
    */
-  renewIntent(payload: IntentRenewPayload): { ok: boolean; message?: string } {
+  renewIntent(payload: { id: string; ttlMs: number }): {
+    ok: boolean;
+    message?: string;
+    ttlWarning?: { expiresIn: number; expiresAt: number; message: string };
+  } {
     const intent = this.state.getIntent(payload.id);
 
     if (intent === undefined) {
@@ -172,7 +189,20 @@ export class Coordinator {
 
     this.state.heartbeatIntent(payload.id);
 
-    return { ok: true };
+    // Check for low TTL warning
+    let ttlWarning;
+    if (payload.ttlMs < 60000) {
+      ttlWarning = {
+        expiresIn: payload.ttlMs,
+        expiresAt: intent.lastBeat + payload.ttlMs,
+        message: 'Intent expires in less than 60 seconds. Consider renewing.',
+      };
+    }
+
+    return {
+      ok: true,
+      ...(ttlWarning !== undefined && { ttlWarning }),
+    };
   }
 
   /**
@@ -212,8 +242,9 @@ export class Coordinator {
       ts: Date.now(),
     });
 
-    console.log(
-      `[Coordinator] Intent closed: ${payload.id} (${payload.status}) - ${payload.note ?? 'no note'}`,
+    logger.info(
+      { intentId: payload.id, status: payload.status, note: payload.note },
+      '[Coordinator] Intent closed',
     );
 
     // If successful commit and mode was WRITE, emit review job
@@ -254,7 +285,7 @@ export class Coordinator {
       ts: Date.now(),
     });
 
-    console.log(`[Coordinator] Review job emitted: ${jobId} for intent ${intent.id}`);
+    logger.info({ jobId, intentId: intent.id }, '[Coordinator] Review job emitted');
 
     return jobId;
   }
@@ -266,7 +297,10 @@ export class Coordinator {
   /**
    * Announce a lease (advisory lock)
    */
-  announceLease(payload: ResolvedLeaseAnnouncePayload): { id: string } {
+  announceLease(payload: ResolvedLeaseAnnouncePayload): {
+    id: string;
+    ttlWarning?: { expiresIn: number; expiresAt: number; message: string };
+  } {
     const lease: Lease = {
       id: nanoid(12),
       agent: payload.agent,
@@ -277,11 +311,31 @@ export class Coordinator {
 
     this.state.addLease(lease);
 
-    console.log(
-      `[Coordinator] Lease announced: ${lease.id} by ${lease.agent} (${lease.mode}) on ${lease.paths.join(', ')} until ${new Date(lease.exp).toISOString()}`,
+    logger.info(
+      {
+        leaseId: lease.id,
+        agent: lease.agent,
+        mode: lease.mode,
+        paths: lease.paths,
+        exp: lease.exp,
+      },
+      '[Coordinator] Lease announced',
     );
 
-    return { id: lease.id };
+    // Check for low TTL warning
+    let ttlWarning;
+    if (payload.ttlMs < 60000) {
+      ttlWarning = {
+        expiresIn: payload.ttlMs,
+        expiresAt: lease.exp,
+        message: 'Lease expires in less than 60 seconds.',
+      };
+    }
+
+    return {
+      id: lease.id,
+      ...(ttlWarning !== undefined && { ttlWarning }),
+    };
   }
 
   // =========================================================================
@@ -539,7 +593,7 @@ export class Coordinator {
         att: { intentId },
       });
 
-      console.warn(`[Coordinator] Intent ${intentId} marked as needs_rebase`);
+      logger.warn({ intentId }, '[Coordinator] Intent marked as needs_rebase');
     }
   }
 
@@ -569,7 +623,7 @@ export class Coordinator {
       return;
     }
 
-    console.log(`[Coordinator] Vote window closed for intent ${intentId}`);
+    logger.debug({ intentId }, '[Coordinator] Vote window closed');
   }
 
   // =========================================================================

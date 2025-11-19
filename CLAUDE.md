@@ -20,7 +20,8 @@ npm run dashboard    # Launch terminal dashboard (TUI)
 
 ### Testing
 ```bash
-npm test                     # Run all tests with vitest
+npm test                     # Run all tests with vitest (interactive)
+npm run test:run             # Run all tests once (non-interactive/CI)
 npm run test:dashboard       # Run dashboard tests only
 vitest src/path/to/test.ts   # Run single test file
 ```
@@ -71,13 +72,13 @@ npm run format:check # Check formatting
 
 ### MCP Surface
 
-**Single Tool**: `hub_op` with 10 operations
+**Single Tool**: `hub_op` with 14 operations
 - `a.register` - Register agent with roles
 - `i.open/vote/renew/close` - Intent lifecycle
 - `l.announce` - Advisory leases
 - `m.send/pull` - Inter-agent messaging
-- `review.request` - Code review routing
-- `expert.ask` - Escalation to GPT-5 Pro
+- `review.request/claim/complete` - Code review routing
+- `expert.request/status/cancel/list` - Async escalation to GPT-5 Pro
 - `s.get` - State snapshot
 
 **Resources**:
@@ -143,10 +144,28 @@ src/server/schemas/
 
 3. **Defaults in Transform**: Apply defaults in `.transform()` (v3 pattern)
    - `priority`: 'n' (normal)
-   - `ttlMs`: 120000 (2 minutes for intents)
+   - `ttlMs`: 600000 (10 minutes for intents)
    - `topic`: 'general' (messages)
 
 4. **Type Derivation**: Use `z.output<typeof Schema>` for payload types
+
+### Logging (Pino)
+
+We use **Pino** for high-performance structured logging.
+
+**Usage:**
+```typescript
+import { logger } from './core/logger.js';
+
+// Structured logging
+logger.info({ agent: 'coder', intentId: '...' }, 'Intent opened');
+logger.error({ err: error, reqId: '...' }, 'Request failed');
+```
+
+**Environment:**
+- `LOG_LEVEL`: 'debug' | 'info' | 'warn' | 'error' (default: 'info')
+- **Development**: Pretty-printed logs (`pino-pretty`)
+- **Production**: JSON output for aggregation
 
 ### Zod v4 Migration
 

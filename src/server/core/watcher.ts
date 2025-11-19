@@ -8,6 +8,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import type { WriteEvent, ServerConfig } from '../types/models.js';
 import type { MessageBus } from './bus.js';
 import type { Coordinator } from './coordinator.js';
+import { logger } from './logger.js';
 
 export class FilesystemWatcher {
   private watcher: FSWatcher | null = null;
@@ -29,14 +30,14 @@ export class FilesystemWatcher {
    */
   start(rootPath: string): void {
     if (this.watcher !== null) {
-      console.warn('[FilesystemWatcher] Already watching');
+      logger.warn('[FilesystemWatcher] Already watching');
       return;
     }
 
     // Store absolute watch root for path normalization
     this.watchRoot = resolve(rootPath);
 
-    console.log(`[FilesystemWatcher] Starting watch on: ${this.watchRoot}`);
+    logger.info({ root: this.watchRoot }, '[FilesystemWatcher] Starting watch');
 
     this.watcher = chokidar.watch(rootPath, {
       // Performance-optimized configuration
@@ -74,11 +75,11 @@ export class FilesystemWatcher {
     });
 
     this.watcher.on('error', (error: unknown) => {
-      console.error('[FilesystemWatcher] Error:', error);
+      logger.error({ err: error }, '[FilesystemWatcher] Error');
     });
 
     this.watcher.on('ready', () => {
-      console.log('[FilesystemWatcher] Ready');
+      logger.info('[FilesystemWatcher] Ready');
     });
   }
 
@@ -89,7 +90,7 @@ export class FilesystemWatcher {
     if (this.watcher !== null) {
       await this.watcher.close();
       this.watcher = null;
-      console.log('[FilesystemWatcher] Stopped');
+      logger.info('[FilesystemWatcher] Stopped');
     }
   }
 
@@ -98,12 +99,12 @@ export class FilesystemWatcher {
    */
   pause(): void {
     this.isPaused = true;
-    console.log('[FilesystemWatcher] Paused');
+    logger.info('[FilesystemWatcher] Paused');
   }
 
   resume(): void {
     this.isPaused = false;
-    console.log('[FilesystemWatcher] Resumed');
+    logger.info('[FilesystemWatcher] Resumed');
   }
 
   /**
@@ -147,7 +148,7 @@ export class FilesystemWatcher {
         ts: now,
       });
 
-      console.warn(`[FilesystemWatcher] Rogue write detected: ${normalizedPath}`);
+      logger.warn({ file: normalizedPath }, '[FilesystemWatcher] Rogue write detected');
     } else if (activeIntents.length > 1 || isWithinConflictWindow) {
       // Conflict - multiple active intents or rapid succession writes
       this.emitWriteEvent({
@@ -158,8 +159,9 @@ export class FilesystemWatcher {
         ts: now,
       });
 
-      console.warn(
-        `[FilesystemWatcher] Conflict detected: ${normalizedPath} (${activeIntents.length} active intents)`,
+      logger.warn(
+        { file: normalizedPath, activeIntents: activeIntents.length },
+        '[FilesystemWatcher] Conflict detected',
       );
 
       // Mark all involved intents as needing rebase
@@ -179,7 +181,10 @@ export class FilesystemWatcher {
           ts: now,
         });
 
-        console.log(`[FilesystemWatcher] Tracked write: ${normalizedPath} (intent: ${intent.id})`);
+        logger.debug(
+          { file: normalizedPath, intentId: intent.id, agent: intent.agent },
+          '[FilesystemWatcher] Tracked write',
+        );
       }
     }
   }

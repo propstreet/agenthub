@@ -5,18 +5,20 @@
 import { Box, Text } from 'ink';
 import type { Intent } from '../../server/types/models.js';
 import { calculateTTLRemaining } from '../utils/time-utils.js';
+import { Panel } from './Panel.js';
 
 export interface IntentPanelProps {
   intents: Intent[];
+  shortcutKey?: string;
 }
 
-export function IntentPanel({ intents }: IntentPanelProps) {
+export function IntentPanel({ intents, shortcutKey }: IntentPanelProps) {
   const getModeIcon = (mode: Intent['mode']): string => {
     switch (mode) {
       case 'R':
         return '📖';
       case 'W':
-        return '✏️';
+        return '✏';
       case 'B':
         return '🔨';
       case 'T':
@@ -66,46 +68,41 @@ export function IntentPanel({ intents }: IntentPanelProps) {
   const MODE_WIDTH = 3;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" padding={1}>
-      <Box marginBottom={1}>
-        <Text bold color="yellow">
-          ⚡ Active Intents ({intents.length})
-        </Text>
-      </Box>
-
-      {intents.length === 0 ? (
-        <Text dimColor>No active intents</Text>
-      ) : (
-        <Box flexDirection="column">
-          {intents.map((intent) => (
-            <Box key={intent.id} alignItems="center">
-              <Box width={ID_MAX + 2} marginRight={1}>
-                <Text dimColor wrap="truncate-end">
-                  {truncate(intent.id, ID_MAX)}
-                </Text>
-              </Box>
-              <Box width={AGENT_MAX + 2} marginRight={1}>
-                <Text wrap="truncate-end">{truncate(intent.agent, AGENT_MAX)}</Text>
-              </Box>
-              <Box width={ICON_WIDTH} marginRight={1} alignItems="center" justifyContent="center">
-                <Text color={getModeColor(intent.mode)}>{getModeIcon(intent.mode)}</Text>
-              </Box>
-              <Box width={MODE_WIDTH} marginRight={1} alignItems="center" justifyContent="center">
-                <Text color={getModeColor(intent.mode)}>{intent.mode}</Text>
-              </Box>
-              <Box width={PATH_MAX} marginRight={1}>
-                <Text dimColor wrap="truncate-end">
-                  {truncate(intent.paths[0] ?? '(no paths)', PATH_MAX)}
-                </Text>
-              </Box>
-              <Box flexGrow={1} alignItems="center" justifyContent="flex-end" flexDirection="row">
-                <Text color={getTTLColor(intent)}>TTL: {getTTLRemaining(intent)}</Text>
-                {hasConflicts(intent) && <Text color="red"> ⚠️</Text>}
-              </Box>
-            </Box>
-          ))}
+    <Panel
+      title={`⚡ Active Intents (${String(intents.length)})`}
+      titleColor="yellow"
+      borderColor="yellow"
+      shortcutKey={shortcutKey}
+      empty={intents.length === 0}
+      emptyMessage="No active intents"
+    >
+      {intents.map((intent) => (
+        <Box key={intent.id} alignItems="center">
+          <Box width={ID_MAX + 2} marginRight={1}>
+            <Text dimColor wrap="truncate-end">
+              {truncate(intent.id, ID_MAX)}
+            </Text>
+          </Box>
+          <Box width={AGENT_MAX + 2} marginRight={1}>
+            <Text wrap="truncate-end">{truncate(intent.agent, AGENT_MAX)}</Text>
+          </Box>
+          <Box width={ICON_WIDTH} marginRight={1} alignItems="center" justifyContent="center">
+            <Text color={getModeColor(intent.mode)}>{getModeIcon(intent.mode)}</Text>
+          </Box>
+          <Box width={MODE_WIDTH} marginRight={1} alignItems="center" justifyContent="center">
+            <Text color={getModeColor(intent.mode)}>{intent.mode}</Text>
+          </Box>
+          <Box width={PATH_MAX} marginRight={1}>
+            <Text dimColor wrap="truncate-end">
+              {truncate(intent.paths[0] ?? '(no paths)', PATH_MAX)}
+            </Text>
+          </Box>
+          <Box flexGrow={1} alignItems="center" justifyContent="flex-end" flexDirection="row">
+            <Text color={getTTLColor(intent)}>TTL: {getTTLRemaining(intent)}</Text>
+            {hasConflicts(intent) && <Text color="red"> ⚠️</Text>}
+          </Box>
         </Box>
-      )}
-    </Box>
+      ))}
+    </Panel>
   );
 }
