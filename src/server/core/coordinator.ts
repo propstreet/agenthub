@@ -80,7 +80,7 @@ export class Coordinator {
             to: existing.agent,
             type: 'chat',
             topic: 'CONFLICT_WARNING',
-            text: `Review conflict with intent ${intent.id} from ${intent.agent}`,
+            text: `Intent conflict detected: ${intent.agent} opened overlapping intent ${intent.id}`,
             data: {
               myIntent: existing.id,
               newIntent: intent.id,
